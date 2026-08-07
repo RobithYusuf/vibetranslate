@@ -1,0 +1,51 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The most useful bug reports say what you did, what happened,
+        and what you expected — in that order.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      placeholder: I selected text in Chrome, pressed Alt+P, and nothing was pasted.
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Select …
+        3. Press …
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown at the bottom of Settings
+    validations: { required: true }
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS (Apple Silicon), macOS (Intel), Windows 11, Windows 10, Other]
+    validations: { required: true }
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Which engine was selected?
+      options:
+        - Built-in free server
+        - My own API key
+        - Offline model
+        - Not sure
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output (optional)
+      description: Settings → Feedback → copy the log. Remove anything private first.
+      render: shell

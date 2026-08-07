@@ -1,0 +1,67 @@
+{
+  "name": "vibetranslate",
+  "version": "1.0.33",
+  "description": "AI translation and voice dictation for macOS and Windows — select text or speak, get the result pasted back in place. Works offline.",
+  "license": "AGPL-3.0-only",
+  "author": "Robith Yusuf",
+  "homepage": "https://vibetranslate.id",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RobithYusuf/vibetranslate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RobithYusuf/vibetranslate/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.18.0",
+  "type": "module",
+  "scripts": {
+    "copy-vad-assets": "node scripts/copy-vad-assets.mjs",
+    "predev": "node scripts/copy-vad-assets.mjs",
+    "prebuild": "node scripts/copy-vad-assets.mjs",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@cloudworxx/tauri-plugin-mac-rounded-corners": "^1.1.1",
+    "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/manrope": "^5.2.8",
+    "@fontsource-variable/plus-jakarta-sans": "^5.2.8",
+    "@ricky0123/vad-web": "^0.0.30",
+    "@tauri-apps/api": "~2.10.0",
+    "@tauri-apps/plugin-autostart": "^2.2.0",
+    "@tauri-apps/plugin-clipboard-manager": "^2.2.0",
+    "@tauri-apps/plugin-global-shortcut": "^2.2.0",
+    "@tauri-apps/plugin-http": "^2.5.9",
+    "@tauri-apps/plugin-notification": "^2.2.0",
+    "@tauri-apps/plugin-process": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.3.3",
+    "@tauri-apps/plugin-store": "^2.2.0",
+    "@tauri-apps/plugin-updater": "^2.0.0",
+    "lucide-react": "^0.469.0",
+    "onnxruntime-web": "^1.27.0",
+    "openai": "^4.77.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hot-toast": "^2.4.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "~2.10.0",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

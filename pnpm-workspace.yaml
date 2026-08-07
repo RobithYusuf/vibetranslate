@@ -1,0 +1,4 @@
+allowBuilds:
+  '@cloudworxx/tauri-plugin-mac-rounded-corners': true
+  esbuild: true
+  protobufjs: true

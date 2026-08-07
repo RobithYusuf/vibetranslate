@@ -1,0 +1,60 @@
+# Checks every push and pull request. The README and CONTRIBUTING promise contributors that
+# their PR is type-checked and built on both platforms — this is that promise.
+#
+# `pull_request` (not pull_request_target) on purpose: fork PRs run WITHOUT access to any
+# secret, so a malicious PR cannot exfiltrate the signing key. Nothing here needs secrets.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Typecheck & build (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build
+
+  rust:
+    name: Check Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      # The frontend must exist before Rust checks: tauri.conf.json points at dist/.
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm build
+      - run: cargo check --manifest-path src-tauri/Cargo.toml

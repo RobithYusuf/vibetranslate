@@ -1,0 +1,255 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Least privilege by default; only the publishing job is allowed to write.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: VibeTranslate
+
+jobs:
+  # Fails a bad tag in ~20 seconds instead of after 40 minutes of building, and stops the
+  # worst release bug there is: a tag whose version doesn't match the version compiled into
+  # the app, which makes the updater install "1.0.33", relaunch as 1.0.32, and offer the
+  # update again — forever.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse non-tag runs
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "Release must run from a v* tag (got $GITHUB_REF)" >&2; exit 1 ;;
+          esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Versions must agree
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          CONF="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$VERSION" != "$CONF" ] || [ "$VERSION" != "$PKG" ]; then
+            echo "version mismatch: tag=$VERSION tauri.conf.json=$CONF package.json=$PKG" >&2
+            exit 1
+          fi
+      - name: Changelog entry must exist
+        run: node scripts/changelog-notes.mjs "${GITHUB_REF_NAME#v}" >/dev/null
+
+  build-macos-arm:
+    needs: preflight
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          key: macos-arm
+      # Frozen: a release binary is signed and auto-distributed, so its dependency tree must
+      # be exactly the reviewed one.
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target aarch64-apple-darwin
+      - name: Stage artifacts (installer + updater bundle)
+        run: |
+          set -euo pipefail
+          B=src-tauri/target/aarch64-apple-darwin/release/bundle
+          mkdir -p dist
+          cp "$B"/dmg/*.dmg              "dist/${APP_NAME}_aarch64.dmg"
+          cp "$B"/macos/*.app.tar.gz     "dist/${APP_NAME}_aarch64.app.tar.gz"
+          cp "$B"/macos/*.app.tar.gz.sig "dist/${APP_NAME}_aarch64.app.tar.gz.sig"
+          ls -la dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-arm
+          path: dist/*
+
+  build-macos-intel:
+    needs: preflight
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          key: macos-intel
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target x86_64-apple-darwin
+      - name: Stage artifacts (installer + updater bundle)
+        run: |
+          set -euo pipefail
+          B=src-tauri/target/x86_64-apple-darwin/release/bundle
+          mkdir -p dist
+          cp "$B"/dmg/*.dmg              "dist/${APP_NAME}_x64.dmg"
+          cp "$B"/macos/*.app.tar.gz     "dist/${APP_NAME}_x64.app.tar.gz"
+          cp "$B"/macos/*.app.tar.gz.sig "dist/${APP_NAME}_x64.app.tar.gz.sig"
+          ls -la dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-intel
+          path: dist/*
+
+  build-windows:
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          key: windows
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Stage artifacts (installer + updater bundle)
+        shell: bash
+        run: |
+          set -euo pipefail
+          B=src-tauri/target/release/bundle
+          mkdir -p dist
+          cp "$B"/nsis/*-setup.exe      "dist/${APP_NAME}_x64-setup.exe"
+          cp "$B"/nsis/*-setup.exe.sig  "dist/${APP_NAME}_x64-setup.exe.sig"
+          ls -la dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows
+          path: dist/*
+
+  release:
+    needs: [build-macos-arm, build-macos-intel, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    # Job-level env so the R2 step's `if` can actually read it: a step's `if` is evaluated
+    # BEFORE that step's own env block exists, and the `secrets` context is not available in
+    # a step `if` at all — the earlier version of this step was skipped on every single run.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - name: Assemble downloads + updater manifest
+        run: |
+          set -euo pipefail
+          mkdir -p downloads
+          find artifacts -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.msi" -o -name "*.app.tar.gz" \) -exec cp {} downloads/ \;
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          PUBDATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Real notes: the OLD app renders these in its update dialog, and its bundled
+          # changelog cannot contain the NEW version's entry. A missing entry is a mistake,
+          # not something to paper over with a placeholder.
+          if ! NOTES_JSON="$(node scripts/changelog-notes.mjs "$VERSION" --json)"; then
+            echo "no changelog entry for $VERSION in src/utils/changelog.ts" >&2
+            exit 1
+          fi
+
+          SIG_ARM="$(find artifacts -name '*_aarch64.app.tar.gz.sig' -exec cat {} \; | tr -d '\n')"
+          SIG_INTEL="$(find artifacts -name '*_x64.app.tar.gz.sig' -exec cat {} \; | tr -d '\n')"
+          SIG_WIN="$(find artifacts -name '*-setup.exe.sig' -exec cat {} \; | tr -d '\n')"
+          test -n "$SIG_ARM" && test -n "$SIG_INTEL" && test -n "$SIG_WIN" \
+            || { echo "missing a signature — the updater would reject this release" >&2; exit 1; }
+
+          # The manifest must not point at files that never landed: a 404 makes the updater
+          # a silent no-op for every user.
+          for f in "${APP_NAME}_aarch64.app.tar.gz" "${APP_NAME}_x64.app.tar.gz" "${APP_NAME}_x64-setup.exe"; do
+            test -s "downloads/$f" || { echo "missing updater artifact: $f" >&2; exit 1; }
+          done
+
+          # Serve binaries from the GitHub Release itself: no server to keep alive, no
+          # credentials in this repo, and GitHub pays the bandwidth.
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          cat > downloads/latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "notes": ${NOTES_JSON},
+            "pub_date": "${PUBDATE}",
+            "platforms": {
+              "darwin-aarch64": { "signature": "${SIG_ARM}", "url": "${BASE}/${APP_NAME}_aarch64.app.tar.gz" },
+              "darwin-x86_64":  { "signature": "${SIG_INTEL}", "url": "${BASE}/${APP_NAME}_x64.app.tar.gz" },
+              "windows-x86_64": { "signature": "${SIG_WIN}", "url": "${BASE}/${APP_NAME}_x64-setup.exe" }
+            }
+          }
+          EOF
+          echo "--- latest.json ---"; cat downloads/latest.json
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: downloads/*
+          generate_release_notes: true
+
+      # Optional mirror for the legacy manifest host. Skipped cleanly when the secrets are
+      # absent — wrangler 4 is required because `--remote` does not exist in wrangler 3.
+      - name: Mirror to R2
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          set -euo pipefail
+          for f in downloads/*; do
+            name="$(basename "$f")"
+            extra=()
+            [ "$name" = "latest.json" ] && extra=(--content-type application/json --cache-control "no-cache")
+            npx --yes wrangler@4 r2 object put "vibetranslate-files/downloads/$name" \
+              --file "$f" --remote "${extra[@]}"
+          done

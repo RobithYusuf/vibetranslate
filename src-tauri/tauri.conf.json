@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VibeTranslate",
+  "identifier": "id.vibetranslate.desktop",
+  "version": "1.0.33",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "VibeTranslate",
+        "width": 950,
+        "height": 750,
+        "resizable": true,
+        "center": true,
+        "visible": true,
+        "focus": true,
+        "label": "settings"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://api.vibetranslate.id https://vibetranslate.id https://api.openai.com https://api.groq.com https://openrouter.ai https://generativelanguage.googleapis.com http://localhost:3000 http://localhost:1420 https://tauri.localhost ipc:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "publisher": "robithdev",
+    "copyright": "© 2024 robithdev",
+    "category": "Productivity",
+    "shortDescription": "AI-powered translation and text enhancement",
+    "longDescription": "VibeTranslate is a desktop app that automatically translates and enhances text using AI. Works everywhere on macOS and Windows.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "nsis": {
+        "installMode": "both",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/nsis-header.bmp",
+        "sidebarImage": "icons/nsis-sidebar.bmp",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY0MENFMTZDN0U0QzZFNUQKUldSZGJreCtiT0VNOUxGTmRmMmFlUU5nYWRXYjZTbmc1N2xweTdMY3ZCSEt2VTdEd2xyU3VFMTEK",
+      "endpoints": [
+        "https://vibetranslate.id/downloads/latest.json",
+        "https://github.com/RobithYusuf/vibetranslate/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}
