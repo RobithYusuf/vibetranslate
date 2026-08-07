@@ -105,12 +105,21 @@ Get it from [vibetranslate.id/download](https://vibetranslate.id/download) or [R
   (needed to copy the selection and paste the result). Microphone is only requested for voice.
 - **Windows** — run the installer or the portable `.exe`. Lives in the system tray.
 
-The installers are **not code-signed or notarized** yet (an Apple Developer account and a
-Windows certificate are paid, recurring costs). So the first launch needs one extra step:
-on macOS right-click the app → **Open** → **Open** (double-clicking shows "damaged"), and on
-Windows click **More info → Run anyway** on the SmartScreen prompt. Updates are a different
-matter: every release is signed with the project's own key and the app refuses any update
-it cannot verify.
+The installers are **not code-signed or notarized** (an Apple Developer account is $99/year
+and Windows certificates are a recurring cost). So the first launch needs one extra step:
+
+- **macOS** — open the app once and let it be blocked, then go to **System Settings → Privacy
+  & Security**, scroll to **Security**, and click **Open Anyway**. Control-clicking the app no
+  longer works for this: Apple removed that override in macOS Sequoia. Do not run
+  `sudo xattr -cr` — it strips every extended attribute from the whole bundle, which is a far
+  bigger hammer than the situation needs.
+- **Windows** — click **More info → Run anyway** on the SmartScreen prompt. On a machine with
+  Smart App Control in enforcement mode there is no override, and the app cannot be installed
+  until it is signed.
+
+Being unsigned means more than a warning: there is no OS-level integrity check on the app
+after install. Updates are a separate matter and are protected — every release is signed with
+the project's own minisign key, and the app refuses any update it cannot verify.
 
 ## 🛠️ Development
 
