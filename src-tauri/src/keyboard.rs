@@ -187,8 +187,14 @@ fn wait_modifiers_released(timeout_ms: u64) {
 #[cfg(target_os = "macos")]
 fn frontmost_name_fast() -> Option<String> {
     use cocoa::base::{id, nil};
+    use objc::rc::autoreleasepool;
     use objc::{class, msg_send, sel, sel_impl};
-    unsafe {
+    // The pool is not optional. This runs on a plain std::thread that lives for the whole
+    // process, several times a second: every returned NSRunningApplication and NSString is
+    // autoreleased, and without a pool to drain them they accumulate for the life of that
+    // thread — hundreds of thousands a day. An owned Rust String is copied out before the pool
+    // drains, so nothing borrowed escapes it.
+    autoreleasepool(|| unsafe {
         let ws: id = msg_send![class!(NSWorkspace), sharedWorkspace];
         if ws == nil {
             return None;
@@ -206,7 +212,7 @@ fn frontmost_name_fast() -> Option<String> {
             return None;
         }
         Some(std::ffi::CStr::from_ptr(c).to_string_lossy().into_owned())
-    }
+    })
 }
 
 // Frontmost app AND its front window's screen position (one osascript round-trip).
@@ -1418,7 +1424,32 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
         // --- Step 4: Execute paste based on terminal type ---
         let mut enigo = Enigo::new(&Settings::default())
             .map_err(|e| format!("Failed to init keyboard: {}", e))?;
-        
+
+        // --- Step 4a: Clear the prompt line, the same way macOS does ---
+        //
+        // This used to differ badly by branch. VS Code and Windows Terminal simply pasted, so
+        // the original text stayed and the translation was appended to it. The legacy branch
+        // sent Ctrl+C to "clear the line" — but Ctrl+C is SIGINT: it kills whatever is running
+        // in that terminal. This is a CLI-agent feature; interrupting a running Claude Code or
+        // Droid task to paste a prompt is the worst thing it could do. macOS was fixed for
+        // exactly this reason and Windows was left behind.
+        //
+        // End collapses any selection to the end of the input, then a bounded, character-exact
+        // run of backspaces removes it. Backspace is universal across PowerShell, cmd.exe,
+        // Windows Terminal, the VS Code terminal and WSL, and it cannot signal a process.
+        if let Some(n) = clear_chars {
+            let n = n.min(500); // same cap as macOS: never hold the keyboard hostage
+            if n > 0 {
+                dlog!("[terminal_replace] clearing {} chars with End + backspace", n);
+                enigo.key(Key::End, Direction::Click).map_err(|e| e.to_string())?;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                for _ in 0..n {
+                    enigo.key(Key::Backspace, Direction::Click).map_err(|e| e.to_string())?;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+        }
+
         match terminal_type {
             TerminalType::VSCode => {
                 // VS Code: Standard Ctrl+V
@@ -1447,26 +1478,9 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
             }
             
             TerminalType::LegacyConsole | TerminalType::Unknown => {
-                // Legacy Console / Unknown: Two-step paste
-                // Step 1: Ctrl+C = SIGINT → clears current line, shows new prompt
-                // Step 2: Ctrl+V = paste translated text
-                dlog!("[terminal_replace] Legacy/Unknown: Ctrl+C + Ctrl+V");
-                
-                // Ctrl+C to clear line (sends SIGINT)
-                dlog!("[terminal_replace] Sending Ctrl+C...");
-                enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
-                
-                // Wait for terminal to process SIGINT
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                
-                // Ctrl+V to paste
-                dlog!("[terminal_replace] Sending Ctrl+V...");
+                // The line was already cleared with backspaces in step 4a. Ctrl+C used to live
+                // here as the "line clear" and must never come back: it is SIGINT.
+                dlog!("[terminal_replace] Legacy/Unknown: Ctrl+V");
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 enigo.key(Key::Unicode('v'), Direction::Press).map_err(|e| e.to_string())?;

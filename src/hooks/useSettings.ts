@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { loadSettings, saveSettings } from '@/services/storage';
+import { loadAllApiKeys, saveAllApiKeys, migratePlaintextKeys } from '@/services/secrets';
 import { Settings, AIProvider, LicenseStatus } from '@/types';
 import { Language } from '@/i18n';
 import { sanitizeCorrections } from '@/utils/voiceCorrections';
@@ -110,7 +111,23 @@ export function useSettings() {
           // forth (setProvider resets `model` to that provider's default), so it MUST run
           // BEFORE we restore the saved model below — otherwise the user's model choice is
           // silently clobbered to the default on every launch.
-          const savedApiKeys = (settings as { apiKeys?: Record<string, string | null> }).apiKeys;
+          // API keys now live in the OS credential store. An older build wrote them into
+          // settings.json in plaintext, so anything still in the file is migrated across and
+          // then dropped from the file on the next save.
+          const plaintextKeys = (settings as { apiKeys?: Record<string, string | null> }).apiKeys;
+          const migrated = await migratePlaintextKeys(plaintextKeys);
+          const savedApiKeys = { ...(plaintextKeys || {}), ...(await loadAllApiKeys()) };
+          if (migrated) {
+            // Strip the plaintext copy NOW rather than waiting for the user to happen to
+            // change a setting — leaving a readable key on disk is the whole problem.
+            const { apiKeys: _dropped, ...withoutKeys } = settings as unknown as Record<string, unknown>;
+            try {
+              await saveSettings(withoutKeys as unknown as Settings);
+              console.log('[Settings] plaintext API keys removed from the settings file');
+            } catch (e) {
+              console.warn('[Settings] could not rewrite settings without the keys:', e);
+            }
+          }
           if (savedApiKeys) {
             console.log('[Settings] Loading API keys per provider');
             // Set each provider's API key
@@ -254,12 +271,13 @@ export function useSettings() {
   }, [setApiKey, setProvider, setModel, setShortcut, setPopupShortcut, setTerminalShortcut, setSourceLang, setTargetLang, setAutoStart, setEnhanceEnabled, setEnhanceShortcut, setVoiceEnabled, setVoiceAutoStop, setVoicePopupPosition, setVoiceSoundEnabled, setMicAutoGain, setUiFont, setUiScale, setVoiceShortcut, setVoiceOriginalShortcut, setSoundEnabled, setLoadingEnabled, setAutoUpdateCheck, setSkippedUpdateVersion, setAppEnabled, setUiLanguage, setLicenseKey, setLicenseStatus, setCustomBaseURL, setCustomModel, setSettingsLoaded]);
 
   const save = useCallback(async () => {
+    // Written to the OS credential store, deliberately NOT into the settings file below.
+    await saveAllApiKeys(apiKeys);
     const settings = {
       licenseKey,
       licenseStatus,
       appEnabled,
       uiLanguage,
-      apiKeys,
       provider,
       model,
       customBaseURL,

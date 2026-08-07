@@ -7,6 +7,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { TranslateResult, AIProvider } from '@/types';
 import { AI_PROVIDERS, LANGUAGE_MAP } from '@/utils/constants';
 import APP_CONFIG from '@/config';
+import { getDeviceId } from '@/utils/deviceId';
 
 interface TranslateOptions {
   text: string;
@@ -178,7 +179,10 @@ async function tryServerTranslate(
   try {
     const response = await fetch(`${APP_CONFIG.API_URL}/api/translate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // The per-install id the free-tier quota keys on — an anonymous random UUID,
+      // not hardware. Without it the worker falls back to per-IP, which lumps a whole
+      // office behind one NAT into a single allowance.
+      headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() },
       body: JSON.stringify({ text, sourceLang, targetLang, enhance, model }),
       signal,
     });
@@ -438,7 +442,10 @@ export async function cleanupTranscript(options: {
   if (config.isServer) {
     const res = await fetch(`${APP_CONFIG.API_URL}/api/translate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // The per-install id the free-tier quota keys on — an anonymous random UUID,
+      // not hardware. Without it the worker falls back to per-IP, which lumps a whole
+      // office behind one NAT into a single allowance.
+      headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() },
       // Follow the user's chosen server model too (pseudo/auto ids resolve server-side)
       body: JSON.stringify({
         text,

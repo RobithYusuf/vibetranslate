@@ -2,6 +2,7 @@
 // Reuses the user's existing per-provider API keys (Groq preferred, then OpenAI).
 
 import { AIProvider } from '@/types';
+import { getDeviceId } from '@/utils/deviceId';
 import { STT_PROVIDERS } from '@/utils/constants';
 import APP_CONFIG from '@/config';
 
@@ -115,6 +116,8 @@ async function transcribeViaServer(
   try {
     response = await fetch(`${APP_CONFIG.API_URL}/api/transcribe`, {
       method: 'POST',
+      // Same per-install quota id as the translate calls (see utils/deviceId.ts).
+      headers: { 'X-Device-Id': getDeviceId() },
       body: form,
       signal,
     });

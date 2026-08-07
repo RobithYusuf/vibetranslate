@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getDeviceId } from '@/utils/deviceId';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { getVersion } from '@tauri-apps/api/app';
 import { useAppStore } from '../stores/appStore';
@@ -30,12 +31,7 @@ export function Paywall({ onActivated }: PaywallProps) {
     setError(null);
     
     try {
-      // Get machine ID
-      let machineId = localStorage.getItem('machineId');
-      if (!machineId) {
-        machineId = crypto.randomUUID();
-        localStorage.setItem('machineId', machineId);
-      }
+      const machineId = getDeviceId();
       
       const response = await fetch(`${APP_CONFIG.API_URL}/api/license/activate`, {
         method: 'POST',

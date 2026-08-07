@@ -24,6 +24,9 @@ tauri-plugin-http = "2.5.9"
 sherpa-onnx = "1.13.4"
 # Integrity check for downloaded speech models (see stt.rs ModelFile::sha256).
 sha2 = "0.10"
+# API keys in the OS credential store (Keychain / Credential Manager) rather than a
+# world-readable settings file. See src/secrets.rs.
+keyring = "4"
 base64 = "0.23"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 futures-util = "0.3"

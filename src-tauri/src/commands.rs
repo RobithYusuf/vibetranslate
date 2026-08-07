@@ -8,6 +8,15 @@ use std::process::Command;
 #[cfg(target_os = "macos")]
 static PRIOR_MUTED: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
 
+/// Serialises every audio transition. PRIOR_MUTED and the machine's actual mute state are one
+/// piece of state, but they used to be updated through two separate short lock acquisitions
+/// with a ~120ms `osascript` in between — so two calls could both read "nothing held", or a
+/// stale un-mute could land after a newer mute and leave the flag and the speakers disagreeing
+/// forever. Held across the subprocess on purpose: these run once per voice session, and
+/// correctness here is worth more than the microseconds.
+#[cfg(target_os = "macos")]
+static AUDIO_OP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // Mute/unmute the laptop's system output while recording voice, so background
 // audio (music, notifications) is silenced — both to focus the user and to keep
 // the mic (and thus the VAD) from picking up speaker audio.
@@ -15,12 +24,18 @@ static PRIOR_MUTED: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None)
 pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
+        // Poisoning must not wedge audio control permanently — a panic elsewhere should not
+        // leave the user unable to get their sound back.
+        let _op = AUDIO_OP.lock().unwrap_or_else(|e| e.into_inner());
         if mute {
             // If we are ALREADY holding a mute, do not read the current state again: it would
             // read back our own mute as the user's "prior" setting, and the later un-mute would
             // then decide the user wanted silence and leave the audio off for good. Overlapping
             // sessions are normal — pressing the voice shortcut again right after finishing.
-            let already_holding = PRIOR_MUTED.lock().map(|g| g.is_some()).unwrap_or(false);
+            let already_holding = PRIOR_MUTED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_some();
             if already_holding {
                 let _ = Command::new("osascript")
                     .arg("-e")
@@ -36,13 +51,20 @@ pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
                               return st";
                 if let Ok(out) = Command::new("osascript").arg("-e").arg(script).output() {
                     let prior = String::from_utf8_lossy(&out.stdout).trim() == "true";
-                    if let Ok(mut g) = PRIOR_MUTED.lock() { *g = Some(prior); }
+                    *PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(prior);
                 }
             }
         } else {
-            // Only un-mute if the user wasn't already muted before we touched it.
-            let prior = PRIOR_MUTED.lock().ok().and_then(|mut g| g.take());
-            if prior != Some(true) {
+            // ONLY Some(false) means "we muted this, and it was audible before". `None` means
+            // we hold nothing — a second restore for the same session, or a stray call — and
+            // must be a no-op. Treating it as "unmute" un-muted machines the user had
+            // deliberately silenced themselves: the first restore consumed Some(true) and
+            // correctly left them muted, then the second saw None and turned their sound on.
+            let prior = PRIOR_MUTED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            if prior == Some(false) {
                 let _ = Command::new("osascript").arg("-e").arg("set volume output muted false").output();
             }
         }
@@ -62,8 +84,15 @@ pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
 /// through Sound settings. Cheap enough to do on every exit path.
 #[cfg(target_os = "macos")]
 pub fn release_mute_if_held() {
-    let prior = PRIOR_MUTED.lock().ok().and_then(|mut g| g.take());
-    if prior.is_some() && prior != Some(true) {
+    // Same lock as set_audio_muted: without it, quitting could observe "nothing held" while a
+    // mute was mid-flight, exit, and leave the orphaned osascript to mute the whole machine
+    // after the app was gone.
+    let _op = AUDIO_OP.lock().unwrap_or_else(|e| e.into_inner());
+    let prior = PRIOR_MUTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if prior == Some(false) {
         let _ = Command::new("osascript")
             .arg("-e")
             .arg("set volume output muted false")

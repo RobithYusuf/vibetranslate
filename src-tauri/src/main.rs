@@ -2,6 +2,7 @@
 
 #[macro_use]
 mod dlog;
+mod secrets;
 mod commands;
 mod keyboard;
 mod tray;
@@ -56,6 +57,9 @@ fn main() {
             commands::show_settings_window,
             commands::hide_settings_window,
             commands::quit_app,
+            secrets::secret_set,
+            secrets::secret_get,
+            secrets::secret_delete,
             commands::show_popup,
             commands::hide_popup,
             commands::show_loading,
