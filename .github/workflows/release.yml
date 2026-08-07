@@ -55,6 +55,8 @@ jobs:
             echo "version mismatch: tag=$VERSION tauri.conf.json=$CONF package.json=$PKG" >&2
             exit 1
           fi
+      - name: Tauri crate and JS API must agree
+        run: node scripts/check-tauri-versions.mjs
       - name: Changelog entry must exist
         run: node scripts/changelog-notes.mjs "${GITHUB_REF_NAME#v}" >/dev/null
 

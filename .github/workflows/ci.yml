@@ -29,6 +29,9 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --no-frozen-lockfile
+      # Cheap, and it is the check that was missing: a Dependabot bump of
+      # @tauri-apps/api passed CI and only broke at release time, on all three platforms.
+      - run: node scripts/check-tauri-versions.mjs
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
 
