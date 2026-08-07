@@ -14,7 +14,9 @@ import { blobToPcm16kBase64 } from '@/utils/pcm';
 import type { VoiceStartPayload } from '@/hooks/useVoiceInput';
 import { applyVoiceCorrections } from '@/utils/voiceCorrections';
 import { notify } from '@/services/notify';
-import logo from '@/assets/logo.png';
+// Higher-resolution mark: the watermark is rendered far larger than the 32px logo used
+// elsewhere, which would visibly soften when scaled and rotated.
+import logoMark from '@/assets/logo-mark.png';
 
 const EMPTY_BARS = new Array(VOICE_BAR_COUNT).fill(0);
 
@@ -493,7 +495,18 @@ export default function RecordingOverlay() {
   const busy = recording || processing; // cancel (Esc) is available the whole time
 
   return (
-    <div className="h-screen w-screen flex items-center justify-between bg-[#1c1c1e] overflow-hidden pl-2.5 pr-2 gap-2 select-none">
+    <div className="relative h-screen w-screen flex items-center justify-between bg-[#1c1c1e] overflow-hidden pl-2.5 pr-2 gap-2 select-none">
+      {/* Tilted logo watermark — a "tattoo" across the pill. Deliberately above everything
+          (so it reads as one overlay, not a background) but at ~7% opacity, and clipped by
+          the pill edges. absolute + pointer-events-none: it must never take layout space or
+          swallow a click meant for the ✓/✗ buttons underneath. */}
+      <img
+        src={logoMark}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        className="vt-watermark pointer-events-none absolute right-1 top-1/2 z-20 h-[58px] w-[58px] select-none"
+      />
       <div className="flex items-center gap-2 min-w-0">
         {recording ? (
           <div className="flex items-end gap-[3px] h-4 shrink-0">
@@ -545,7 +558,9 @@ export default function RecordingOverlay() {
           </button>
         </div>
       ) : (
-        <img src={logo} alt="" className="w-4 h-4 opacity-25 shrink-0" draggable={false} />
+        // The watermark now carries the branding, so the idle state no longer needs a logo
+        // occupying a flex slot. Keeps the pill the same width in every state.
+        <span className="w-4 shrink-0" />
       )}
     </div>
   );

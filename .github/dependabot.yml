@@ -1,20 +1,38 @@
-# Weekly, grouped, and limited on purpose: a solo maintainer drowns in one-PR-per-package.
+# Monthly, grouped, and limited on purpose: a solo maintainer drowns in one-PR-per-package.
+#
+# Majors are grouped too. The first month this repo was public, seven of ten open PRs were
+# individual major bumps — a public repo covered in bot PRs reads as unmaintained, which is
+# the opposite of what the PR list is for.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: monthly }
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
+      npm-major:
+        update-types: [major]
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule: { interval: monthly }
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+      cargo-major:
+        update-types: [major]
+    ignore:
+      # enigo synthesises the keystrokes that ARE this app — copy, paste, the terminal
+      # line-clear. A major bump there is a hand-tested project with a real device in front
+      # of you, not something to merge because CI compiled it. Bump it deliberately.
+      - dependency-name: enigo
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]

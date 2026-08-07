@@ -380,6 +380,34 @@ fn activate_app() {
     }
 }
 
+// Activating the app is unavoidable — WebKit gives a background app a silent microphone — but
+// `activateIgnoringOtherApps:` raises EVERY visible window we own, not just the one being
+// shown. With Settings left open on another display, triggering voice made the whole settings
+// UI jump to the front on that screen: "the popup appears, but the main page opens too".
+//
+// So: activate, then immediately order our OTHER windows back down. They stay open exactly
+// where the user left them; only the overlay comes forward. AppKit window ordering must run on
+// the main thread.
+#[cfg(target_os = "macos")]
+fn order_back_other_windows(app: &AppHandle, keep: &'static str) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        use cocoa::base::{id, nil};
+        use objc::{msg_send, sel, sel_impl};
+        for (label, w) in app.webview_windows() {
+            if label == keep || !w.is_visible().unwrap_or(false) {
+                continue;
+            }
+            if let Ok(ptr) = w.ns_window() {
+                unsafe {
+                    let ns: id = ptr as id;
+                    let _: () = msg_send![ns, orderBack: nil];
+                }
+            }
+        }
+    });
+}
+
 // Build the recording overlay once (hidden). Pre-created at startup so it is
 // already rendered and its event listeners are ready by the time it's shown.
 pub fn ensure_recording_window(app: &AppHandle) {
@@ -420,16 +448,25 @@ pub async fn show_recording(app: AppHandle, position: Option<String>) -> Result<
         // Bring the app to the foreground FIRST so WebKit un-mutes the mic (getUserMedia is
         // silent for a background app), then focus the overlay so ✓/✗ + Esc work.
         #[cfg(target_os = "macos")]
-        activate_app();
+        {
+            activate_app();
+            // Undo the collateral damage of activation before the user can see it.
+            order_back_other_windows(&app, "recording");
+        }
         let _ = window.set_focus();
         #[cfg(target_os = "macos")]
         set_overlay_level(&window); // keep it floating above everything
         // Re-focus shortly after: activation is asynchronous, and if another of our windows
-        // (e.g. settings) grabs key status first, Enter/Esc would land there instead.
+        // (e.g. settings) grabs key status first, Enter/Esc would land there instead. The
+        // same asynchrony can let a raised window slip back up, so re-apply the ordering too.
         let w = window.clone();
+        #[cfg(target_os = "macos")]
+        let app2 = app.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(200));
             let _ = w.set_focus();
+            #[cfg(target_os = "macos")]
+            order_back_other_windows(&app2, "recording");
         });
     }
     Ok(())

@@ -87,3 +87,23 @@
     @apply border border-gray-200 min-w-[200px] z-50;
   }
 }
+
+
+/* Listening-overlay watermark. The tilt and the slow breathe are what make it read as a
+   deliberate mark rather than a stray icon; the opacity ceiling is low on purpose — it must
+   never compete with the level bars, the elapsed time or the ✓/✗ buttons it sits over.
+   Honours reduced-motion: the mark stays, the movement does not. */
+.vt-watermark {
+  transform: translateY(-50%) rotate(-18deg);
+  opacity: 0.07;
+  animation: vt-watermark-breathe 7s ease-in-out infinite;
+}
+
+@keyframes vt-watermark-breathe {
+  0%, 100% { opacity: 0.05; transform: translateY(-50%) rotate(-18deg) scale(1); }
+  50%      { opacity: 0.11; transform: translateY(-50%) rotate(-15deg) scale(1.05); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vt-watermark { animation: none; }
+}
