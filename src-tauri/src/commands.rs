@@ -16,15 +16,17 @@ pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         if mute {
-            // Save current muted state first.
-            if let Ok(out) = Command::new("osascript")
-                .arg("-e").arg("output muted of (get volume settings)")
-                .output()
-            {
+            // Read the prior state and mute in ONE osascript process. Two processes measured
+            // 233ms median (115 + 117) against 119ms combined — and this sits directly between
+            // pressing the voice shortcut and the microphone opening, so it was over a third of
+            // the delay that made the app look like it started listening late.
+            let script = "set st to output muted of (get volume settings)\n\
+                          set volume output muted true\n\
+                          return st";
+            if let Ok(out) = Command::new("osascript").arg("-e").arg(script).output() {
                 let prior = String::from_utf8_lossy(&out.stdout).trim() == "true";
                 if let Ok(mut g) = PRIOR_MUTED.lock() { *g = Some(prior); }
             }
-            let _ = Command::new("osascript").arg("-e").arg("set volume output muted true").output();
         } else {
             // Only un-mute if the user wasn't already muted before we touched it.
             let prior = PRIOR_MUTED.lock().ok().and_then(|mut g| g.take());
@@ -39,6 +41,15 @@ pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
         let _ = mute; // TODO: Windows system-mute support
         Ok(())
     }
+}
+
+/// Actually leave the app. Settings > Quit used to call hide_settings_window, so choosing
+/// Quit only closed the window: the app kept running in the tray, still holding Accessibility
+/// and still answering global shortcuts. A user who picks Quit and later finds it alive
+/// reasonably concludes it ignored them. Matches what the tray's Quit does.
+#[tauri::command]
+pub fn quit_app() {
+    std::process::exit(0);
 }
 
 #[tauri::command]

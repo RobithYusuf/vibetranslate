@@ -297,6 +297,7 @@ export const STT_PROVIDERS: {
 
 export const VOICE_STATUS_MESSAGES: Record<string, string> = {
   idle: '',
+  starting: 'Getting ready…',
   recording: 'Listening…',
   transcribing: 'Transcribing…',
   translating: 'Translating…',

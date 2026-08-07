@@ -54,6 +54,12 @@ import { MicVAD } from '@ricky0123/vad-web';
 export type AutoStopReason = 'silence' | 'nospeech' | 'maxed';
 
 interface StartOptions {
+  // Awaited immediately before the recorder starts capturing, and allowed to throw to abort.
+  // The caller uses it to keep "system output is muted before the first chunk" true while
+  // doing the mute concurrently with opening the microphone, and to bail if the user
+  // cancelled during startup — a cancel that lands earlier can't stop a recorder that does
+  // not exist yet, which used to leave a live microphone in a hidden overlay.
+  beforeStart?: () => Promise<void>;
   onAutoStop?: (reason: AutoStopReason) => void;
   onLevel?: (bars: number[]) => void;
   // false = manual mode: VAD never auto-stops (user stops by re-pressing the
@@ -571,10 +577,34 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
     ? new MediaRecorder(recordStream, { mimeType, ...recOpts })
     : new MediaRecorder(recordStream, recOpts);
   mediaRecorder.ondataavailable = (e: BlobEvent) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+
+  // Last gate before capture (see StartOptions.beforeStart). On abort, tear the graph down
+  // here rather than leaving an open microphone behind.
+  if (opts.beforeStart) {
+    try {
+      await opts.beforeStart();
+    } catch (err) {
+      cleanup();
+      throw err;
+    }
+  }
+
   // Timeslice: flush a chunk every 1s. Without it MediaRecorder only emits data on stop(),
   // and when the (capture-owning) main window is hidden in the tray that single event can be
   // throttled/dropped -> empty blob -> "No speech detected". Periodic chunks survive that.
-  mediaRecorder.start(1000);
+  // Resolve only once the recorder has actually STARTED. start() is asynchronous — the start
+  // event arrived ~177ms later when measured — and returning before it meant the caller told
+  // the user to speak into a recorder that was not capturing yet.
+  const rec = mediaRecorder;
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+    rec.addEventListener('start', done, { once: true });
+    // Never hang the whole voice session on a missing event: some WebView builds have been
+    // inconsistent about firing 'start', and by this point capture has been requested anyway.
+    setTimeout(done, 400);
+    rec.start(1000);
+  });
   console.log(`[Voice] Recording started (mime: ${mediaRecorder.mimeType}, mode: ${opts.autoStop === false ? 'MANUAL' : 'AUTO'}, boost: ${boost ? `${MIC_BOOST_GAIN}x` : 'off'})`);
 
   startVad(stream, opts);

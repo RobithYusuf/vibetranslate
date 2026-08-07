@@ -1,6 +1,6 @@
 {
   "name": "vibetranslate",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "AI translation and voice dictation for macOS and Windows — select text or speak, get the result pasted back in place. Works offline.",
   "license": "AGPL-3.0-only",
   "author": "Robith Yusuf",
@@ -26,7 +26,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "_comment:build:local": "Contributors have no updater signing key, and tauri build fails without one because createUpdaterArtifacts is on. This overlay turns updater artifacts off. A config FILE rather than inline JSON: the shell eats the quotes when npm runs the script, and it breaks differently again on Windows.",
+    "build:local": "tauri build --config src-tauri/tauri.local.conf.json"
   },
   "dependencies": {
     "@cloudworxx/tauri-plugin-mac-rounded-corners": "^1.1.1",

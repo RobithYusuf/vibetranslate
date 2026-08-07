@@ -643,7 +643,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     setActiveMenu(null);
     switch (action) {
       case 'quit':
-        await invoke('hide_settings_window');
+        await invoke('quit_app');
         break;
       case 'clear-logs':
         setLogs([]);
@@ -987,9 +987,15 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                             openai: 'https://platform.openai.com/api-keys',
                             openrouter: 'https://openrouter.ai/keys',
                             groq: 'https://console.groq.com/keys',
+                            gemini: 'https://aistudio.google.com/apikey',
                           };
+                          // A custom OpenAI-compatible endpoint has no canonical key page, and
+                          // Gemini was simply missing — both used to call open(undefined), which
+                          // does nothing and reads as a dead button.
+                          const url = urls[provider];
+                          if (!url) return;
                           const { open } = await import('@tauri-apps/plugin-shell');
-                          await open(urls[provider]);
+                          await open(url);
                         }}
                         className="text-[12px] text-blue-400 hover:text-blue-300 hover:underline"
                       >

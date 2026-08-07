@@ -49,7 +49,10 @@ export default defineConfig({
   server: {
     // Use Tauri's default dev port 1420 (5173 is often taken by other dev/Docker apps).
     // 1420 is also in the server's CORS allowlist, so Built-in (Free) models/translate work in dev.
-    port: 1420,
+    // strictPort stays on deliberately: silently moving to another port would break that CORS
+    // allowlist and the Built-in (Free) engine would fail in dev for no visible reason. If 1420
+    // is already taken, set VITE_DEV_PORT instead of guessing.
+    port: Number(process.env.VITE_DEV_PORT) || 1420,
     strictPort: true,
     watch: {
       ignored: ['**/src-tauri/**'],

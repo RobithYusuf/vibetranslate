@@ -89,6 +89,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target aarch64-apple-darwin
+      # The updater config is the one thing that, if it silently goes missing, strands every
+      # installed user with no error anywhere. Checked against the built binary, not the repo.
+      - name: Verify updater config survived the build
+        run: python3 scripts/verify-updater-config.py "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/VibeTranslate.app/Contents/MacOS/vibetranslate" src-tauri/tauri.conf.json
       - name: Stage artifacts (installer + updater bundle)
         run: |
           set -euo pipefail
@@ -129,6 +133,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target x86_64-apple-darwin
+      # The updater config is the one thing that, if it silently goes missing, strands every
+      # installed user with no error anywhere. Checked against the built binary, not the repo.
+      - name: Verify updater config survived the build
+        run: python3 scripts/verify-updater-config.py "src-tauri/target/x86_64-apple-darwin/release/bundle/macos/VibeTranslate.app/Contents/MacOS/vibetranslate" src-tauri/tauri.conf.json
       - name: Stage artifacts (installer + updater bundle)
         run: |
           set -euo pipefail
@@ -166,6 +174,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Verify updater config survived the build
+        shell: bash
+        run: python3 scripts/verify-updater-config.py src-tauri/target/release/vibetranslate.exe src-tauri/tauri.conf.json
       - name: Stage artifacts (installer + updater bundle)
         shell: bash
         run: |

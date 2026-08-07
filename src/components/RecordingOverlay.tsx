@@ -76,8 +76,9 @@ type RunConfig = VoiceStartPayload['config'];
  * hidden, because this window is always on-screen during a recording.
  */
 export default function RecordingOverlay() {
-  const [status, setStatus] = useState<VoiceStatus>('recording');
-  const [message, setMessage] = useState<string>(VOICE_STATUS_MESSAGES.recording);
+  const [status, setStatus] = useState<VoiceStatus>('starting');
+  const muteGateRef = useRef<Promise<void> | null>(null);
+  const [message, setMessage] = useState<string>(VOICE_STATUS_MESSAGES.starting);
   const [bars, setBars] = useState<number[]>(EMPTY_BARS);
   const idleRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -112,12 +113,21 @@ export default function RecordingOverlay() {
   // MAIN's recording flag IMMEDIATELY via 'voice-finished' — NOT deferred behind the hide
   // delay, because a webview about to be hidden could drop a deferred emit. Only the cosmetic
   // hide is delayed (done lingers briefly, error longer so it's readable, cancel hides at once).
+  // The mute is now started concurrently with opening the microphone, so an un-mute can be
+  // requested while the mute is still in flight. Landing first would leave the user's speakers
+  // muted after the session ended, so every un-mute waits for the mute to settle.
+  const restoreAudio = async () => {
+    try { await muteGateRef.current; } catch { /* the mute failing doesn't block restoring */ }
+    muteGateRef.current = null;
+    void setSystemMute(false);
+  };
+
   const finishSession = (visual: 'done' | 'error' | 'cancel') => {
     if (finishedRef.current) return;
     finishedRef.current = true;
     startedRef.current = false;
     setRecStartedAt(0); // stop the elapsed ticker even when status stays 'recording' (cancel path)
-    void setSystemMute(false);
+    void restoreAudio();
     void emit('voice-finished');
     // On cancel/error/no-speech we didn't paste, so VibeTranslate — which was brought to the
     // foreground to un-mute the mic — would stay in front ("app pops up"). Hand focus straight back
@@ -172,7 +182,7 @@ export default function RecordingOverlay() {
       try {
         announce('transcribing');
         const { blob, voicedMs, hadSpeech } = await stopRecording();
-        void setSystemMute(false); // recording done -> restore audio right away
+        void restoreAudio(); // recording done -> restore audio right away
 
         // Min-duration guard: only trust the VAD's "no speech" when THIS stop was the VAD's own
         // decision (auto). On a MANUAL finish (Done / Enter / re-press) the user stopped on
@@ -200,6 +210,10 @@ export default function RecordingOverlay() {
             console.log(`[Voice] local engine ok in ${Math.round(performance.now() - t0)}ms`);
           } catch (localErr) {
             console.warn('[Voice] local engine failed, falling back to online:', localErr);
+            // The user picked an offline engine, so uploading the audio is the opposite of what
+            // they asked for. It still beats losing the recording, but it must not be silent —
+            // a console warning is invisible to them, and the README now promises this is shown.
+            announce('transcribing', 'Offline model failed — sending online');
             rawTranscript = await transcribe({
               blob,
               provider: config.provider,
@@ -349,18 +363,26 @@ export default function RecordingOverlay() {
       targetPosRef.current = payload.targetPos ?? null;
       processingRef.current = false;
       cancelledRef.current = false;
-      announce('recording');
-      setRecStartedAt(Date.now()); // fresh ticker for THIS session (see the ticker effect below)
+      // NOT 'recording' yet. Muting the system output and opening the microphone measured
+      // ~525ms cold on this machine, and announcing "Listening…" up front told the user to
+      // start talking during it — which is exactly why the first words went missing.
+      announce('starting');
       setBars(EMPTY_BARS);
-      // AWAIT the mute so laptop audio is actually silenced BEFORE the recorder's
-      // first chunk — otherwise speaker sound bleeds into the start of the clip.
-      await setSystemMute(true);
-      // The mute await takes ~100-300ms; if the user hit Esc/cancel during it, a terminal
-      // state already ran. Bail BEFORE opening the mic — otherwise we'd start a recording
-      // in the now-hidden overlay that nothing stops (leaked mic, wedged next session).
-      if (cancelledRef.current || finishedRef.current) { void setSystemMute(false); return; }
+      // Start the mute WITHOUT awaiting it and open the microphone at the same time. The mute
+      // only has to be finished before the first captured chunk, not before the mic opens, so
+      // serialising the two was ~233ms of pure latency. beforeStart below re-imposes the order.
+      muteGateRef.current = setSystemMute(true);
+      if (cancelledRef.current || finishedRef.current) { void restoreAudio(); return; }
       try {
         await startRecording({
+          // Re-imposes the invariant the old serial await gave us for free: the speakers are
+          // silenced before the recorder captures anything. It also replaces the cancel check
+          // that used to sit after the mute await — throwing here aborts before the recorder
+          // starts, instead of leaving a live mic in a hidden overlay.
+          beforeStart: async () => {
+            await muteGateRef.current;
+            if (cancelledRef.current || finishedRef.current) throw new Error('cancelled during startup');
+          },
           autoStop: payload.config.voiceAutoStop, // manual mode (false) -> stop only on re-press
           autoGain: payload.config.micAutoGain,   // AGC boosts quiet mics (fixes "No speech detected")
           maxMs: payload.config.voiceMaxMs,       // per-user recording cap from Settings
@@ -385,7 +407,11 @@ export default function RecordingOverlay() {
         });
         // Cancel may have landed while startRecording() was opening the mic (cancelRecording()
         // was then a no-op because the recorder didn't exist yet). Tear the now-live recorder down.
-        if (cancelledRef.current || finishedRef.current) { cancelRecording(); void setSystemMute(false); return; }
+        if (cancelledRef.current || finishedRef.current) { cancelRecording(); void restoreAudio(); return; }
+        // Capture is genuinely running now — this is the honest moment to invite speech, and
+        // the elapsed timer should count from here rather than from the keypress.
+        announce('recording');
+        setRecStartedAt(Date.now()); // fresh ticker for THIS session (see the ticker effect below)
         if (payload.config.voiceSoundEnabled) { try { await invoke('play_sound', { soundType: 'start' }); } catch { /* */ } }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

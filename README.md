@@ -108,11 +108,20 @@ it cannot verify.
 ```bash
 pnpm install
 pnpm tauri:dev      # run in dev
-pnpm tauri build    # build installers (dmg / nsis)
+pnpm build:local    # build installers (dmg / nsis / msi)
 ```
 
 Prerequisites: Rust, Node.js 22.13+ and pnpm 11. Windows also needs Visual Studio C++ Build Tools.
 A build from source is fully functional — including the built-in free server.
+
+Two things that will otherwise waste your afternoon:
+
+- Use `pnpm build:local`, not `pnpm tauri build`. The plain command also produces *updater*
+  artifacts, which have to be signed with the maintainer's private key, so it fails for
+  everyone else. `build:local` turns that off and builds the same installers.
+- The dev server pins port **1420** on purpose (it is the port the free built-in engine's CORS
+  allowlist knows). If something else already holds it, `pnpm tauri:dev` fails loudly rather
+  than silently moving — set `VITE_DEV_PORT=1421 pnpm tauri:dev` if you need another one.
 
 ## 🌐 Network & licensing (what the app talks to)
 

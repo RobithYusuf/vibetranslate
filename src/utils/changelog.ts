@@ -10,6 +10,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.35',
+    date: '2026-08-07',
+    changes: [
+      'Voice: the overlay now says "Getting ready…" until the microphone is genuinely recording, and only then says "Listening…" — it used to invite you to speak about half a second before anything was being captured, so the first words went missing',
+      'Voice starts faster: silencing system audio now happens while the microphone opens instead of before it, and reads the previous volume state in one step',
+      'Voice: if an offline speech model fails and the audio has to go online instead, the app now tells you rather than only writing it to a log',
+      'Settings: Quit actually quits — it used to just close the window and leave the app running in the tray',
+      'Settings: the "Get API key" link works for Gemini and no longer does nothing on a custom endpoint',
+      'The licence and third-party notices now ship inside the app, as AGPL-3.0 requires',
+      'Building from source works for contributors again: use pnpm build:local, which does not need the maintainer signing key',
+    ],
+  },
+  {
     version: '1.0.34',
     date: '2026-08-07',
     changes: [

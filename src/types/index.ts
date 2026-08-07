@@ -18,6 +18,11 @@ export type VoiceMode = 'translate' | 'original';
 
 export type VoiceStatus =
   | 'idle'
+  // Between the shortcut and the microphone actually capturing there is a real gap
+  // (system mute + getUserMedia + recorder start). Showing 'recording' during it invited
+  // users to start talking ~500ms before anything was being recorded, so the first words
+  // were lost. 'starting' owns that window.
+  | 'starting'
   | 'recording'
   | 'transcribing'
   | 'translating'

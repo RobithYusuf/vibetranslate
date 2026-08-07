@@ -31,6 +31,9 @@ pnpm build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
+To produce real installers locally use `pnpm build:local` — plain `pnpm tauri build` also
+builds updater artifacts, which need the maintainer's signing key and will fail for you.
+
 ## Pull request flow
 
 1. Fork, branch, and make your change

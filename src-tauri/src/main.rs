@@ -55,6 +55,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::show_settings_window,
             commands::hide_settings_window,
+            commands::quit_app,
             commands::show_popup,
             commands::hide_popup,
             commands::show_loading,

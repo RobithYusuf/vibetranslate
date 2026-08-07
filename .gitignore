@@ -50,3 +50,12 @@ src-tauri/gen/schemas/
 
 # Agent/tooling scratch
 .claude/
+
+# Downloaded/built artifacts. A 17MB arm.tar.gz once reached a commit through `git add -A`
+# and was copied straight into the public export — the export denylist matched names, not
+# file kinds, so nothing stopped it.
+*.tar.gz
+*.tgz
+*.dmg
+*.msi
+*.zip
