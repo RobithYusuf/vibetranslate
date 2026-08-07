@@ -210,9 +210,9 @@ export const translations = {
     voiceDictRemove: 'Remove',
     voiceLangFollowNote: 'Spoken language follows your translation "From" setting (General tab). Auto-detect handles mixed Indonesian + English.',
     voiceTranslateLabel: 'Voice → Translate (to target language)',
-    voiceOriginalLabel: 'Voice → Original (raw transcription)',
+    voiceOriginalLabel: 'Voice → Dictation (raw transcription)',
     quickStartVoice: 'Or press the Voice shortcut to dictate — transcribe or translate',
-    shortcutVoiceDesc: 'Speak → paste raw text (Original) or translated. Auto-stop is optional (beta).',
+    shortcutVoiceDesc: 'Speak → paste your words as dictation, or translated. Auto-stop is optional (beta).',
     voiceEnableInGeneral: 'Turn on Voice Input in the General tab to use these shortcuts.',
 
     // AI Provider (cards + model fetch)
@@ -481,9 +481,9 @@ export const translations = {
     voiceDictRemove: 'Hapus',
     voiceLangFollowNote: 'Bahasa ucapan mengikuti pengaturan "Dari" terjemahan (tab Umum). Deteksi otomatis menangani campuran Indonesia + Inggris.',
     voiceTranslateLabel: 'Suara → Terjemah (ke bahasa target)',
-    voiceOriginalLabel: 'Suara → Asli (transkripsi mentah)',
+    voiceOriginalLabel: 'Suara → Dikte (transkripsi mentah)',
     quickStartVoice: 'Atau tekan pintasan Suara untuk dikte — transkripsi atau terjemah',
-    shortcutVoiceDesc: 'Bicara → tempel teks asli (Original) atau terjemahan. Auto-stop opsional (beta).',
+    shortcutVoiceDesc: 'Bicara → tempel hasil dikte, atau terjemahannya. Auto-stop opsional (beta).',
     voiceEnableInGeneral: 'Aktifkan Input Suara di tab Umum untuk memakai pintasan ini.',
 
     // AI Provider (cards + model fetch)

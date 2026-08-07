@@ -73,7 +73,7 @@ fn build_tray_menu<R: Runtime>(app: &AppHandle<R>, s: &TrayShortcuts) -> tauri::
     let f_terminal = MenuItem::with_id(app, "f_terminal", "CLI Translate (Replace)", false, acc(&s.terminal))?;
     let f_enhance = MenuItem::with_id(app, "f_enhance", "Enhance", false, acc(&s.enhance))?;
     let f_voice = MenuItem::with_id(app, "f_voice", "Voice → Translate", false, acc(&s.voice))?;
-    let f_voice_orig = MenuItem::with_id(app, "f_voice_orig", "Voice → Original", false, acc(&s.voice_original))?;
+    let f_voice_orig = MenuItem::with_id(app, "f_voice_orig", "Voice → Dictation", false, acc(&s.voice_original))?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let open = MenuItem::with_id(app, "settings", "Open Settings", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;

@@ -27,6 +27,15 @@
 
 ---
 
+<p align="center">
+  <img src="screenshots/settings-general.png" width="760" alt="VibeTranslate settings: pick the free built-in engine or your own API key, set languages, and see every shortcut in one place">
+</p>
+
+<p align="center"><sub>The free built-in engine is selected out of the box, so the first translation needs no setup.
+The shortcuts in this screenshot have been customised — the defaults are in the table further down.</sub></p>
+
+---
+
 ## ✨ Features
 
 | | |
