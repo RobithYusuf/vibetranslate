@@ -34,7 +34,7 @@ cocoa = "0.26"
 objc = "0.2.7"
 # Global mouse-button hook (CGEventTap). All already in the tree via cocoa 0.26, so
 # pinning to the same minor adds no extra crate version.
-core-graphics = "0.24"
+core-graphics = "0.25"
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
 
