@@ -132,33 +132,25 @@ Two things that will otherwise waste your afternoon:
   allowlist knows). If something else already holds it, `pnpm tauri:dev` fails loudly rather
   than silently moving — set `VITE_DEV_PORT=1421 pnpm tauri:dev` if you need another one.
 
-## 🌐 Network & licensing (what the app talks to)
+## 🌐 What the app sends, and where
 
-Being open source means being straight about this:
+An app that holds Accessibility permission owes you a straight answer:
 
-| When | What is sent | Where |
-|---|---|---|
-| On launch, and on window focus (max once per 5 min) | nothing but the request itself | `api.vibetranslate.id/api/status` — returns whether the free mode is on and an optional notice to display |
-| You translate or dictate using the **built-in server** | the text or audio for that one request | our API → the AI provider → straight back to you |
-| You translate or dictate using **your own key** | the text or audio | directly to the provider you configured — our servers are not involved |
-| You use an **offline speech model** | audio stays on your machine — *unless* the local model fails, in which case it falls back to the engine you configured | see note below |
-| Update check | current version | the updater manifest |
+| You use | What leaves your machine |
+|---|---|
+| **Built-in free engine** | that request's text or audio → our API → the AI provider → back to you |
+| **Your own API key** | the same, but straight to your provider — our servers are not involved |
+| **An offline speech model** | nothing — *unless* the model fails to load, in which case the audio falls back to your configured engine |
 
-Nothing is stored on our side. The free server is rate-limited by IP address, which is used
-for that check and not retained. Your API keys are kept locally and are never sent to us.
+Plus a status check on launch and on focus (at most once per 5 minutes), and the updater's
+version check. Nothing is stored on our side, the free server is rate-limited by IP which is
+not retained, and your API keys never leave your machine.
 
-**About "offline":** offline models cover *speech-to-text*. Two things still leave your
-machine even with one selected: **Voice → Translate** sends the transcript to a translation
-engine (translating is what it does), and the optional AI cleanup in **Voice → Dictation**
-does the same. And if a local model fails to load, the app falls back to the online engine
-rather than dropping your recording. If you want a hard guarantee that nothing leaves,
-use **Voice → Dictation** with AI cleanup off.
-
-**One thing to know:** the status endpoint carries a `freeMode` flag. It is `true` today and
-the app is free. If it were ever set to `false`, this build would ask for a license key
-instead of running. That switch is server-side and is disclosed here deliberately rather
-than left for you to find in `src/hooks/useAppStatus.ts` — where you are welcome to read
-exactly what it does. Being AGPL, you are also free to fork and remove it.
+Two caveats worth knowing. "Offline" covers speech-to-text only: **Voice → Translate** and the
+optional AI cleanup still send the transcript out, so for a hard guarantee use **Voice →
+Dictation** with cleanup off. And the status endpoint carries a `freeMode` flag — `true`
+today; were it ever `false`, this build would ask for a licence key. Said here rather than
+left to be found in `src/hooks/useAppStatus.ts`, and being AGPL you can fork it out.
 
 ## 🤝 Contributing
 

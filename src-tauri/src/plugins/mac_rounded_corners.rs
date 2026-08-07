@@ -1,8 +1,6 @@
-// Suppress warnings from deprecated Cocoa APIs. The command params + TrafficLightsConfig
-// are only used on macOS; on Windows the impls are cfg'd out, so they read as unused there.
+// Unterdrücke Warnings von veralteten Cocoa APIs
 #![allow(unexpected_cfgs)]
 #![allow(deprecated)]
-#![allow(unused_variables, dead_code)]
 
 use tauri::{AppHandle, Runtime, WebviewWindow};
 
