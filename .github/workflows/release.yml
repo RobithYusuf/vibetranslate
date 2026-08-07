@@ -10,9 +10,13 @@ on:
 permissions:
   contents: read
 
+# Cancel a superseded run. Recovering from a bad release means force-moving the tag, and
+# without this the older run keeps going and can publish artifacts built from the OLD commit
+# under the NEW version number. Because the version string is identical, the updater would
+# never offer the corrected build — every user who updated in that window is stuck silently.
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   APP_NAME: VibeTranslate
@@ -32,6 +36,15 @@ jobs:
             *) echo "Release must run from a v* tag (got $GITHUB_REF)" >&2; exit 1 ;;
           esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tag must still point at this commit
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          AT="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          if [ "$AT" != "$GITHUB_SHA" ]; then
+            echo "tag ${GITHUB_REF_NAME} has moved to $AT; this run builds $GITHUB_SHA" >&2
+            exit 1
+          fi
       - name: Versions must agree
         run: |
           set -euo pipefail

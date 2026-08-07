@@ -37,7 +37,10 @@ export const DEFAULT_MIC_AUTO_GAIN = true;
 // without the harsh clipping a larger multiplier causes on already-loud input.
 export const MIC_BOOST_GAIN = 2.5;
 export const DEFAULT_MODE = 'replace';
-export const DEFAULT_PROVIDER: AIProvider = 'gemini';
+// The built-in free server, so a fresh install works before the user has configured
+// anything. Defaulting to a BYOK provider meant every first run hit "no API key" — and that
+// path produced no visible feedback at all, so the app simply looked broken.
+export const DEFAULT_PROVIDER: AIProvider = 'server';
 
 // Maximum characters for translation (API token limits)
 export const MAX_TRANSLATE_CHARS = 5000;

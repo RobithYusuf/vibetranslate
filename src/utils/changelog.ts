@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.34',
+    date: '2026-08-07',
+    changes: [
+      'Fresh installs now work out of the box: the app starts on the free built-in server instead of asking for an API key you have not set yet',
+      'Pressing a shortcut with no engine configured now says so, with a notification and an on-screen message — before, nothing happened at all',
+      'Fixed a slow leak of leftover system processes: every sound the app played left one behind, and after weeks of uptime that could keep other apps from launching',
+      'Windows: the MSI installer and portable .exe are published again alongside the regular installer',
+      'The README now describes exactly what leaves your machine in offline mode, and warns that installers are not yet code-signed',
+    ],
+  },
+  {
     version: '1.0.33',
     date: '2026-08-07',
     changes: [

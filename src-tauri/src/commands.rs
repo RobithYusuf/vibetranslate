@@ -449,10 +449,16 @@ pub async fn play_sound(sound_type: String) -> Result<(), String> {
             sound_name
         );
         
-        let _ = Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .spawn();
+        // Reap it. Rust's Child has no Drop that waits, so a spawn-and-forget leaves a zombie
+        // for the lifetime of the app — and this fires on every translate start, success and
+        // error. A long-running menu-bar app accumulates them until fork() starts failing for
+        // the whole login session, which then breaks unrelated programs and looks like
+        // anything but a sound effect.
+        if let Ok(mut child) = Command::new("osascript").arg("-e").arg(&script).spawn() {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
     }
     
     #[cfg(target_os = "windows")]
@@ -494,10 +500,13 @@ pub async fn play_sound(sound_type: String) -> Result<(), String> {
 pub async fn open_accessibility_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("open")
+        let mut child = Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
             .spawn()
             .map_err(|e| e.to_string())?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
     
     #[cfg(not(target_os = "macos"))]

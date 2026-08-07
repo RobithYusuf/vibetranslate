@@ -80,6 +80,25 @@ async function reportFailure(context: 'Translation' | 'Enhance', msg: string): P
   return hint;
 }
 
+// No engine configured is a setup problem, not a runtime failure, so it gets its own path.
+// It also happens BEFORE the loading overlay is shown, which is why this puts one up itself:
+// the old code called setError() into a store no mounted component renders, and release
+// builds strip console.error — so pressing the shortcut on a fresh install did nothing at
+// all, visibly indistinguishable from a broken app.
+async function reportMissingEngine(loadingEnabled: boolean): Promise<void> {
+  await notify(
+    'No translation engine selected',
+    'Open Settings and choose Free (built-in), or add your own API key.',
+  );
+  if (!loadingEnabled) return;
+  try {
+    await invoke('show_loading', { x: null, y: null });
+    await emit('loading-status', { status: 'error', message: 'No engine — open Settings' });
+    await sleep(2200);
+    await invoke('hide_loading');
+  } catch { /* */ }
+}
+
 // Send system notification for errors/warnings
 async function notify(title: string, body: string) {
   try {
@@ -385,6 +404,7 @@ export function useTranslation() {
     if (!hasValidKey) {
       console.error('❌ [Translate] ERROR: No API key!');
       setError('No API key');
+      await reportMissingEngine(loadingEnabled);
       return;
     }
 
@@ -863,6 +883,7 @@ export function useTranslation() {
     if (!hasValidKey) {
       console.error('❌ [Enhance] ERROR: No API key!');
       setError('No API key');
+      await reportMissingEngine(loadingEnabled);
       return;
     }
 

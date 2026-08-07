@@ -96,6 +96,13 @@ Get it from [vibetranslate.id/download](https://vibetranslate.id/download) or [R
   (needed to copy the selection and paste the result). Microphone is only requested for voice.
 - **Windows** — run the installer or the portable `.exe`. Lives in the system tray.
 
+The installers are **not code-signed or notarized** yet (an Apple Developer account and a
+Windows certificate are paid, recurring costs). So the first launch needs one extra step:
+on macOS right-click the app → **Open** → **Open** (double-clicking shows "damaged"), and on
+Windows click **More info → Run anyway** on the SmartScreen prompt. Updates are a different
+matter: every release is signed with the project's own key and the app refuses any update
+it cannot verify.
+
 ## 🛠️ Development
 
 ```bash
@@ -116,11 +123,18 @@ Being open source means being straight about this:
 | On launch, and on window focus (max once per 5 min) | nothing but the request itself | `api.vibetranslate.id/api/status` — returns whether the free mode is on and an optional notice to display |
 | You translate or dictate using the **built-in server** | the text or audio for that one request | our API → the AI provider → straight back to you |
 | You translate or dictate using **your own key** | the text or audio | directly to the provider you configured — our servers are not involved |
-| You use an **offline model** | nothing leaves your machine | — |
+| You use an **offline speech model** | audio stays on your machine — *unless* the local model fails, in which case it falls back to the engine you configured | see note below |
 | Update check | current version | the updater manifest |
 
-Nothing is stored on our side beyond an anonymous per-device counter used to enforce the
-free server's daily quota. Your API keys are kept locally and are never sent to us.
+Nothing is stored on our side. The free server is rate-limited by IP address, which is used
+for that check and not retained. Your API keys are kept locally and are never sent to us.
+
+**About "offline":** offline models cover *speech-to-text*. Two things still leave your
+machine even with one selected: **Voice → Translate** sends the transcript to a translation
+engine (translating is what it does), and the optional AI cleanup in **Voice → Dictation**
+does the same. And if a local model fails to load, the app falls back to the online engine
+rather than dropping your recording. If you want a hard guarantee that nothing leaves,
+use **Voice → Dictation** with AI cleanup off.
 
 **One thing to know:** the status endpoint carries a `freeMode` flag. It is `true` today and
 the app is free. If it were ever set to `false`, this build would ask for a license key
