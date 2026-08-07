@@ -161,6 +161,11 @@ jobs:
           mkdir -p dist
           cp "$B"/nsis/*-setup.exe      "dist/${APP_NAME}_x64-setup.exe"
           cp "$B"/nsis/*-setup.exe.sig  "dist/${APP_NAME}_x64-setup.exe.sig"
+          # The download page has always offered an MSI and a portable exe alongside the
+          # installer. Tauri builds the MSI anyway; skipping it here made both links 404 the
+          # moment downloads stopped being served from the old origin.
+          cp "$B"/msi/*.msi             "dist/${APP_NAME}_x64.msi"
+          cp src-tauri/target/release/vibetranslate.exe "dist/${APP_NAME}_x64_portable.exe"
           ls -la dist/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
