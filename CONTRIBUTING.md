@@ -19,7 +19,7 @@ pnpm install
 pnpm tauri:dev
 ```
 
-Requirements: Node 20+, pnpm 10, and the Rust toolchain (`rustup`). Windows also needs the
+Requirements: Node 22.13+, pnpm 11, and the Rust toolchain (`rustup`). Windows also needs the
 Visual Studio C++ Build Tools. On macOS the app will ask for **Accessibility** permission the
 first time it copies or pastes.
 

@@ -104,7 +104,7 @@ pnpm tauri:dev      # run in dev
 pnpm tauri build    # build installers (dmg / nsis)
 ```
 
-Prerequisites: Rust, Node.js 20+ and pnpm. Windows also needs Visual Studio C++ Build Tools.
+Prerequisites: Rust, Node.js 22.13+ and pnpm 11. Windows also needs Visual Studio C++ Build Tools.
 A build from source is fully functional — including the built-in free server.
 
 ## 🌐 Network & licensing (what the app talks to)

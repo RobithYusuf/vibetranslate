@@ -13,7 +13,7 @@
     "url": "https://github.com/RobithYusuf/vibetranslate/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "packageManager": "pnpm@11.18.0",
   "type": "module",
