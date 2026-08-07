@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.36',
+    date: '2026-08-07',
+    changes: [
+      'Voice: triggering the shortcut no longer drags the settings window to the front — on a multi-monitor setup it used to jump onto whichever screen it was left on, so you got a window you did not ask for alongside the listening popup',
+      'Voice: the listening popup now carries a faint tilted logo watermark',
+      'The raw-transcription shortcut is called "Voice → Dictation" everywhere — the app used to call it "Voice → Original" while every mention in the docs said Dictation, so people looked for a setting that did not exist under that name',
+    ],
+  },
+  {
     version: '1.0.35',
     date: '2026-08-07',
     changes: [
