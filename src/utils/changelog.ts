@@ -10,6 +10,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.37',
+    date: '2026-08-08',
+    changes: [
+      'Voice: fixed background audio coming back on partway through a recording, or never being silenced at all — starting a new recording soon after the previous one could let the old session turn the sound back on',
+      'Voice: quitting while recording no longer leaves your Mac silent with nothing to explain why',
+      'Much lighter on battery: the app was starting a background process about twice a second, all day, just to notice which window you were in. It now asks the system directly — roughly two thousand times cheaper per check',
+      'Offline speech models are now pinned to an exact published version and verified before use, so a changed or tampered download is rejected instead of loaded',
+    ],
+  },
+  {
     version: '1.0.36',
     date: '2026-08-07',
     changes: [

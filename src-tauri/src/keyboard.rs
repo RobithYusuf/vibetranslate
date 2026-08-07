@@ -154,6 +154,61 @@ fn wait_modifiers_released(timeout_ms: u64) {
     }
 }
 
+// Same answer as get_frontmost_app_and_window(), obtained WITHOUT spawning a process.
+//
+// Why this exists: the background tracker used to run the osascript version roughly twice a
+// second for the entire life of the app — about 180ms wall and a whole fork+exec each time,
+// ~180,000 processes a day on an app that is meant to sit quietly in the menu bar. It never
+// showed up in the app's own CPU column because the cost was billed to short-lived children,
+// so it would have been reported as "the battery drains and I don't know why".
+//
+// CGWindowListCopyWindowInfo returns on-screen windows in front-to-back order, with the owner
+// name and the bounds, in-process. Window TITLES would need Screen Recording permission; the
+// owner name and bounds do not, and titles are not needed here.
+//
+// The frontmost application's name, in-process and effectively free.
+//
+// Why this exists: the background tracker used to spawn `osascript` roughly twice a second for
+// the entire life of the app — a fork+exec and ~175ms each time, on something meant to sit
+// quietly in the menu bar. It never appeared in the app's own CPU column, because the cost was
+// billed to short-lived children; it would have been reported as "the battery drains and I
+// don't know why".
+//
+// Measured on this machine, per call: this 0.086ms, `osascript` 174.7ms — about 2000x. Both
+// returned the same name. NSRunningApplication is documented as safe to use from any thread.
+//
+// NAME ONLY, deliberately. An earlier attempt also read the window position here, via
+// CGWindowListCopyWindowInfo, and it disagreed with System Events: for the same window it gave
+// (-761, -85) where System Events gave (-760, -1410) — the two measure from different display
+// origins. Positions are compared against System Events readings elsewhere (simulate_copy
+// re-checks that the frontmost window is still the captured one), so mixing the two would
+// silently break window matching on a multi-monitor setup, which is the very bug this tracker
+// exists to prevent.
+#[cfg(target_os = "macos")]
+fn frontmost_name_fast() -> Option<String> {
+    use cocoa::base::{id, nil};
+    use objc::{class, msg_send, sel, sel_impl};
+    unsafe {
+        let ws: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if ws == nil {
+            return None;
+        }
+        let app: id = msg_send![ws, frontmostApplication];
+        if app == nil {
+            return None;
+        }
+        let name: id = msg_send![app, localizedName];
+        if name == nil {
+            return None;
+        }
+        let c: *const std::os::raw::c_char = msg_send![name, UTF8String];
+        if c.is_null() {
+            return None;
+        }
+        Some(std::ffi::CStr::from_ptr(c).to_string_lossy().into_owned())
+    }
+}
+
 // Frontmost app AND its front window's screen position (one osascript round-trip).
 #[cfg(target_os = "macos")]
 fn get_frontmost_app_and_window() -> Result<(String, Option<(i32, i32)>), String> {
@@ -318,6 +373,11 @@ pub fn start_app_tracker() {
     dlog!("[AppTracker] Starting background tracker...");
     
     thread::spawn(|| {
+        // ~5 seconds at the 300ms tick below.
+        #[cfg(target_os = "macos")]
+        const REFRESH_EVERY_TICKS: u32 = 16;
+        #[cfg(target_os = "macos")]
+        let mut ticks_since_reading: u32 = 0;
         loop {
             // While an operation has pinned the target, don't overwrite it.
             if tracker_is_paused() {
@@ -326,6 +386,39 @@ pub fn start_app_tracker() {
             }
             #[cfg(target_os = "macos")]
             {
+                // Cheap check first: the in-process name tells us whether anything changed at
+                // all. When it has not — which is almost always, since this loops several times
+                // a second while the user works in one window — we skip the AppleScript round
+                // trip entirely. That call was the whole cost of this tracker: a fork+exec and
+                // ~180ms, twice a second, forever.
+                let cheap_name = frontmost_name_fast();
+
+                // Our own window being frontmost is not a change worth chasing: LAST_ACTIVE_APP
+                // deliberately holds the last OTHER app, because that is what a paste needs.
+                // Without this branch the name could never match the cache and we would pay for
+                // the expensive reading on every tick the whole time Settings is open.
+                if cheap_name.as_deref().map(is_our_app).unwrap_or(false) {
+                    thread::sleep(Duration::from_millis(300));
+                    continue;
+                }
+
+                let unchanged = match (&cheap_name, LAST_ACTIVE_APP.lock().ok().as_deref()) {
+                    (Some(now), Some(Some(prev))) => now == prev,
+                    _ => false,
+                };
+                let have_pos = LAST_ACTIVE_WIN_POS.lock().ok().map(|g| g.is_some()).unwrap_or(false);
+                // Moving a window WITHIN one app changes its position without changing the name,
+                // and nothing tells us about it. A slow refresh bounds how stale that can get at
+                // a few seconds, while still costing a fraction of the old every-tick polling.
+                let due_refresh = ticks_since_reading >= REFRESH_EVERY_TICKS;
+                if unchanged && have_pos && !due_refresh {
+                    ticks_since_reading += 1;
+                    thread::sleep(Duration::from_millis(300));
+                    continue;
+                }
+                ticks_since_reading = 0;
+                // Something moved, or we have no position yet: pay for the authoritative
+                // reading, whose coordinates match what the rest of the code compares against.
                 if let Ok((app, pos)) = get_frontmost_app_and_window() {
                     if !is_our_app(&app) {
                         if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {

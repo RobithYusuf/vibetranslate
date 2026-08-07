@@ -126,6 +126,8 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> Result<(), Box<dyn std::er
                 show_settings(app);
             }
             "quit" => {
+                // Same reason as commands::quit_app: never leave the machine muted.
+                crate::commands::release_mute_if_held();
                 std::process::exit(0);
             }
             _ => {}

@@ -80,6 +80,9 @@ type RunConfig = VoiceStartPayload['config'];
 export default function RecordingOverlay() {
   const [status, setStatus] = useState<VoiceStatus>('starting');
   const muteGateRef = useRef<Promise<void> | null>(null);
+  // Bumped once per voice session. The mute is global system state, so an un-mute belonging to
+  // a session that has already ended must never be allowed to fire during the NEXT one.
+  const muteSessionRef = useRef(0);
   const [message, setMessage] = useState<string>(VOICE_STATUS_MESSAGES.starting);
   const [bars, setBars] = useState<number[]>(EMPTY_BARS);
   const idleRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -119,7 +122,13 @@ export default function RecordingOverlay() {
   // requested while the mute is still in flight. Landing first would leave the user's speakers
   // muted after the session ended, so every un-mute waits for the mute to settle.
   const restoreAudio = async () => {
+    const mySession = muteSessionRef.current;
     try { await muteGateRef.current; } catch { /* the mute failing doesn't block restoring */ }
+    // A newer session may have started while this was waiting for the mute to settle. Un-muting
+    // now would turn the user's audio back on in the MIDDLE of that recording — reported as
+    // "YouTube stops, then comes back on halfway through". The new session owns the mute and
+    // will restore it when it ends.
+    if (muteSessionRef.current !== mySession) return;
     muteGateRef.current = null;
     void setSystemMute(false);
   };
@@ -373,6 +382,7 @@ export default function RecordingOverlay() {
       // Start the mute WITHOUT awaiting it and open the microphone at the same time. The mute
       // only has to be finished before the first captured chunk, not before the mic opens, so
       // serialising the two was ~233ms of pure latency. beforeStart below re-imposes the order.
+      muteSessionRef.current += 1;
       muteGateRef.current = setSystemMute(true);
       if (cancelledRef.current || finishedRef.current) { void restoreAudio(); return; }
       try {
