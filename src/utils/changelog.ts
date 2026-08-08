@@ -10,6 +10,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.38',
+    date: '2026-08-08',
+    changes: [
+      'Your API keys now live in the system Keychain (macOS) or Credential Manager (Windows) instead of a settings file any program on your computer could read — existing keys are moved across automatically on first launch',
+      'Windows: CLI Translate no longer interrupts whatever is running in your terminal. It used to send Ctrl+C to clear the line, which kills a running command or AI agent task; it now erases the line character by character, the same way macOS does',
+      'Windows: CLI Translate in VS Code and Windows Terminal now replaces your text instead of pasting the translation after it',
+      'Fixed background audio being turned back on if you had muted your machine yourself before recording',
+      'Settings no longer claims system sound is muted while recording on Windows — that has only ever worked on macOS',
+      'The free daily allowance now counts per install rather than per network address, so an office or campus sharing one connection no longer shares one allowance',
+      'macOS install instructions corrected: Apple removed the right-click-to-open shortcut, so the app now tells you the path that actually works',
+    ],
+  },
+  {
     version: '1.0.37',
     date: '2026-08-08',
     changes: [
