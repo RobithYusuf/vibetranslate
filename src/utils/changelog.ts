@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.40',
+    date: '2026-08-08',
+    changes: [
+      'New: Live dictation (Beta) — your words appear on screen while you speak, fully on-device, covering Indonesian and English in one model. The text is still pasted once, at the end, so nothing ever types into your documents mid-sentence',
+      'Enable it in Settings → Voice. It needs a one-time 340 MB model download, shown with progress before anything is fetched',
+      'The listening popup shows which engine is hearing you (e.g. "live · zipformer"), and your correction dictionary applies to live results too',
+    ],
+  },
+  {
     version: '1.0.39',
     date: '2026-08-08',
     changes: [
