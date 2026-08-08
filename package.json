@@ -1,6 +1,6 @@
 {
   "name": "vibetranslate",
-  "version": "1.0.38",
+  "version": "1.0.39",
   "description": "AI translation and voice dictation for macOS and Windows — select text or speak, get the result pasted back in place. Works offline.",
   "license": "AGPL-3.0-only",
   "author": "Robith Yusuf",

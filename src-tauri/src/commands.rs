@@ -46,12 +46,28 @@ pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
                 // 233ms median (115 + 117) against 119ms combined — and this sits directly
                 // between pressing the voice shortcut and the microphone opening, so it was over
                 // a third of the delay that made the app look like it started listening late.
-                let script = "set st to output muted of (get volume settings)\n\
+                // `prev`, not `st`: `st` is reserved in AppleScript, and naming the variable
+                // that made this whole script a syntax error — so `set volume output muted
+                // true` never ran and background audio simply kept playing. It failed silently
+                // because the exit status was ignored, which is the more important half of
+                // this fix: a broken script must never again read as "muted successfully".
+                let script = "set prev to (output muted of (get volume settings))\n\
                               set volume output muted true\n\
-                              return st";
-                if let Ok(out) = Command::new("osascript").arg("-e").arg(script).output() {
-                    let prior = String::from_utf8_lossy(&out.stdout).trim() == "true";
-                    *PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(prior);
+                              return prev";
+                match Command::new("osascript").arg("-e").arg(script).output() {
+                    Ok(out) if out.status.success() => {
+                        let prior = String::from_utf8_lossy(&out.stdout).trim() == "true";
+                        *PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(prior);
+                    }
+                    Ok(out) => {
+                        // Nothing was muted, so claim nothing: leaving PRIOR_MUTED unset keeps
+                        // the later restore from "un-muting" audio we never touched.
+                        return Err(format!(
+                            "could not mute system audio: {}",
+                            String::from_utf8_lossy(&out.stderr).trim()
+                        ));
+                    }
+                    Err(e) => return Err(format!("could not run osascript: {e}")),
                 }
             }
         } else {
@@ -624,4 +640,58 @@ pub async fn open_accessibility_settings() -> Result<(), String> {
     }
     
     Ok(())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod mute_behaviour {
+    //! Drives the real system mute. It restores the machine's original state before finishing.
+    //! This exists because a syntax error in the mute script shipped to users and produced
+    //! silence in the logs instead of silence in the speakers.
+    fn muted_now() -> bool {
+        let out = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg("output muted of (get volume settings)")
+            .output()
+            .expect("osascript");
+        String::from_utf8_lossy(&out.stdout).trim() == "true"
+    }
+
+    /// The command is `async fn` but never awaits anything, so a one-shot poll is enough and
+    /// avoids pulling a whole async runtime in just to test it.
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        fn noop(_: *const ()) {}
+        fn clone(p: *const ()) -> RawWaker { RawWaker::new(p, &VT) }
+        static VT: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VT)) };
+        let mut cx = Context::from_waker(&waker);
+        let mut f = Box::pin(f);
+        loop {
+            if let Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    #[test]
+    fn mutes_then_restores() {
+        let original = muted_now();
+        println!("keadaan awal muted = {original}");
+
+        block_on(super::set_audio_muted(true)).expect("mute gagal");
+        let after_mute = muted_now();
+        println!("sesudah mute       = {after_mute}");
+        assert!(after_mute, "TIDAK membisukan — ini bug yang dilaporkan");
+
+        block_on(super::set_audio_muted(false)).expect("restore gagal");
+        let after_restore = muted_now();
+        println!("sesudah restore    = {after_restore}");
+        assert_eq!(after_restore, original, "tidak kembali ke keadaan semula");
+
+        // Restore kedua (jalur yang benar-benar terjadi: stopRecording lalu finishSession)
+        // harus tidak melakukan apa-apa.
+        block_on(super::set_audio_muted(false)).expect("restore kedua gagal");
+        assert_eq!(muted_now(), original, "restore kedua mengubah keadaan");
+        println!("restore kedua      = no-op: benar");
+    }
 }

@@ -10,6 +10,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.39',
+    date: '2026-08-08',
+    changes: [
+      'Fixed background audio not being muted at all while recording — a mistake introduced in 1.0.37 meant the mute command silently failed and music or video kept playing straight through',
+    ],
+  },
+  {
     version: '1.0.38',
     date: '2026-08-08',
     changes: [
