@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.41',
+    date: '2026-08-09',
+    changes: [
+      'Settings: the on/off switch now sits at the top of the General tab instead of a card at the bottom, and it says what it really does — it turns off every shortcut, voice included. Everything it controls dims when you switch it off',
+      'Windows can no longer be dragged narrower than they can render — Settings used to collapse into overlapping columns if you pulled an edge too far',
+      'The macOS Accessibility card now uses the accessibility symbol instead of a shield, which read like a security warning',
+    ],
+  },
+  {
     version: '1.0.40',
     date: '2026-08-08',
     changes: [
