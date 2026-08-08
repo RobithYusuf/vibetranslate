@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { warmLive, releaseLive } from '@/services/sttStream';
 import { 
-  Key, Languages, Keyboard, Sparkles, Copy, Power, Globe, Shield,
+  Key, Languages, Keyboard, Sparkles, Copy, Globe, Accessibility,
   Volume2, Loader2, CheckCircle, XCircle, BookOpen, MessageSquare, MousePointer, AlertTriangle, Mic, Palette, ChevronRight, RefreshCw, X,
   Gift, HardDrive, Lock, Cloud, Download
 } from 'lucide-react';
@@ -842,13 +842,25 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
         <div className={`${showConsole ? 'w-1/2' : 'flex-1'} overflow-y-auto p-6 bg-[#1e1e1e]`}>
           {activeTab === 'general' && (
             <div className="space-y-5 w-full">
-              {/* AI Provider & API Key */}
+              {/* AI Provider & API Key — and the app-wide power switch, in this header.
+                  It used to be a whole card of its own at the BOTTOM of the tab titled
+                  "Translation Active": furthest from everything it controls, and the name
+                  lied — in code it disables every shortcut, voice included. Riding on the
+                  first card costs no vertical space, and everything it governs dims below
+                  it when off, so cause and effect need no explaining. */}
               <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <Key size={15} className="text-[#0078d4]" />
-                  <span className="text-[14px] font-medium text-white/90">{t('aiProvider')}</span>
+                <div className="flex items-center gap-2.5 mb-0.5">
+                  <Key size={15} className="text-[#0078d4] shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[14px] font-medium text-white/90 block">{t('aiProvider')}</span>
+                    <p className="text-[12px] text-white/40 mt-0.5">{t('aiProviderDesc')}</p>
+                  </div>
+                  <Toggle
+                    enabled={appEnabled}
+                    onChange={(enabled) => { console.log('[Settings] App Enabled:', enabled); setAppEnabled(enabled); }}
+                  />
                 </div>
-                <p className="text-[12px] text-white/40 -mt-1">{t('aiProviderDesc')}</p>
+                <div className={`space-y-3 ${appEnabled ? '' : 'opacity-45 saturate-50 pointer-events-none'} transition-opacity`}>
                 {/* Mode: Free (Built-in) vs Own API Key */}
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
@@ -1011,8 +1023,10 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                     </div>
                   </>
                 )}
+                </div>
               </div>
 
+              <div className={`space-y-5 ${appEnabled ? '' : 'opacity-45 saturate-50 pointer-events-none'} transition-opacity`}>
               {/* Languages (default source + target for translation) */}
               <div className="bg-[#252526] rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1095,25 +1109,6 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 </button>
               </div>
 
-              {/* App Enabled Toggle */}
-              <div className="bg-gradient-to-r from-[#252526] to-[#2a2a2c] rounded-lg p-4 border border-[#454545]">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${appEnabled ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
-                      <Power size={18} className={appEnabled ? 'text-green-400' : 'text-red-400'} />
-                    </div>
-                    <div>
-                      <span className="text-[14px] font-medium text-white block">{t('translationActive')}</span>
-                      <span className="text-[12px] text-white/40">
-                        {appEnabled ? t('shortcutsEnabled') : t('shortcutsDisabled')}
-                      </span>
-                    </div>
-                  </div>
-                  <Toggle
-                    enabled={appEnabled}
-                    onChange={(enabled) => { console.log('[Settings] App Enabled:', enabled); setAppEnabled(enabled); }}
-                  />
-                </div>
               </div>
 
               {/* Voice Input (Voice Active) — enable + stop mode live here; shortcuts are in the Shortcuts tab */}
@@ -1514,8 +1509,14 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
               {/* macOS Accessibility - Only show on macOS */}
               {isMac && (
                 <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Shield size={14} className="text-amber-400" />
+                  <div className="flex items-center gap-2.5">
+                    {/* A shield read as "security warning"; this is a permission the user
+                        GRANTS, and macOS labels it with the same accessibility mark. The
+                        tinted badge also gives a 14px glyph enough weight to sit beside
+                        14px type instead of floating next to it. */}
+                    <span className="w-6 h-6 rounded-md bg-amber-500/15 border border-amber-500/25 grid place-items-center shrink-0">
+                      <Accessibility size={14} className="text-amber-400" />
+                    </span>
                     <span className="text-[14px] font-medium text-white/80">{t('macAccessibility')}</span>
                   </div>
                   <p className="text-[12px] text-white/50">{t('macAccessibilityDesc')}</p>

@@ -144,6 +144,10 @@ pub async fn show_settings_window(app: AppHandle) -> Result<(), String> {
             .title("VibeTranslate")
             .inner_size(850.0, 500.0)
             .resizable(true)
+            // Same floor as the config window: below ~720px the settings grid collapses into
+            // overlapping columns, and idly dragging an edge produced a squashed app that
+            // read as broken rather than resized.
+            .min_inner_size(720.0, 480.0)
             .center()
             .build()
             .map_err(|e| e.to_string())?;
@@ -193,6 +197,9 @@ pub async fn show_popup(app: AppHandle) -> Result<(), String> {
             .title("Translation")
             .inner_size(480.0, 520.0)
             .resizable(true)
+            // Enough for a short paragraph plus the action buttons; anything narrower wraps
+            // the buttons out of reach.
+            .min_inner_size(320.0, 280.0)
             .decorations(true)
             .always_on_top(true)
             .focused(false)

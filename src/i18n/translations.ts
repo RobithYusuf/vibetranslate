@@ -12,9 +12,6 @@ export const translations = {
     tabTutorial: 'Tutorial',
     
     // General Tab
-    translationActive: 'Translation Active',
-    shortcutsEnabled: 'Shortcuts are enabled',
-    shortcutsDisabled: 'Shortcuts are disabled',
     startAtLogin: 'Start at Login',
     language: 'Language',
     languages: 'Languages',
@@ -205,7 +202,7 @@ export const translations = {
     sttStatusNoModel: 'Not downloaded — using the online path for now',
     sttStatusNoKey: 'No key yet — using the built-in server for now',
     sttKeyPlaceholder: 'Paste your {provider} API key',
-    aiProviderDesc: 'The TEXT translation engine — provider, model, and API key used by every translate feature.',
+    aiProviderDesc: 'The TEXT translation engine. The switch turns the whole app on or off — every shortcut, voice included.',
     mtOfflineDesc: '200 languages, on-device (615 MB) · source language: not Auto',
     voiceDictLabel: 'Voice corrections',
     voiceDictDesc: 'Words the speech-to-text keeps getting wrong: each match in the transcript is replaced before translating/pasting.',
@@ -287,9 +284,6 @@ export const translations = {
     tabTutorial: 'Tutorial',
     
     // General Tab
-    translationActive: 'Terjemahan Aktif',
-    shortcutsEnabled: 'Pintasan diaktifkan',
-    shortcutsDisabled: 'Pintasan dinonaktifkan',
     startAtLogin: 'Mulai Saat Login',
     language: 'Bahasa',
     languages: 'Bahasa',
@@ -480,7 +474,7 @@ export const translations = {
     sttStatusNoModel: 'Belum diunduh — sementara memakai jalur online',
     sttStatusNoKey: 'Key belum diisi — sementara memakai server bawaan',
     sttKeyPlaceholder: 'Tempel API key {provider}-mu',
-    aiProviderDesc: 'Mesin penerjemah TEKS — provider, model, dan API key untuk semua fitur translate.',
+    aiProviderDesc: 'Mesin penerjemah TEKS. Saklarnya menyalakan/mematikan seluruh aplikasi — semua shortcut, termasuk voice.',
     mtOfflineDesc: '200 bahasa, di perangkat (615 MB) · bahasa sumber: bukan Auto',
     voiceDictLabel: 'Kamus koreksi suara',
     voiceDictDesc: 'Kata yang sering salah didengar speech-to-text: tiap kemunculannya di transkrip diganti sebelum diterjemahkan/di-paste.',

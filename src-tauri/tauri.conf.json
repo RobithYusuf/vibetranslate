@@ -17,6 +17,8 @@
         "width": 950,
         "height": 750,
         "resizable": true,
+        "minWidth": 720,
+        "minHeight": 480,
         "center": true,
         "visible": true,
         "focus": true,
