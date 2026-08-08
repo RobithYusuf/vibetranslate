@@ -5,6 +5,9 @@ import { Loader2, Check, X } from 'lucide-react';
 import { VoiceStatus, VoiceMode } from '@/types';
 import { VOICE_STATUS_MESSAGES, VOICE_BAR_COUNT, MAX_TRANSLATE_CHARS, VOICE_AUTODETECT_FALLBACK_LANG } from '@/utils/constants';
 import { startRecording, stopRecording, cancelRecording } from '@/services/audioRecorder';
+import { onLiveTranscript } from '@/services/sttStream';
+import { LiveSession } from '@/services/liveSession';
+import { humanizeTranscript } from '@/utils/humanizeTranscript';
 import { transcribe } from '@/services/transcription';
 import { translateText } from '@/services/openai';
 import { setClipboardText } from '@/services/clipboard';
@@ -136,6 +139,13 @@ export default function RecordingOverlay() {
   const finishSession = (visual: 'done' | 'error' | 'cancel') => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    if (liveRef.current) {
+      liveRef.current.cancel();
+      liveRef.current = null;
+    }
+    setLiveText('');
+    transcriptShownRef.current = false;
+    void invoke('hide_transcript').catch(() => { /* cosmetic */ });
     startedRef.current = false;
     setRecStartedAt(0); // stop the elapsed ticker even when status stays 'recording' (cancel path)
     void restoreAudio();
@@ -179,6 +189,18 @@ export default function RecordingOverlay() {
     }
   }, []);
 
+  // Partial transcripts from the streaming recogniser. Subscribed once for the window's life:
+  // the overlay is pre-created and reused for every session, so re-subscribing per session
+  // would leak listeners.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    onLiveTranscript((p) => {
+      if (!liveRef.current?.isActive) return;
+      setLiveText(p.text);
+    }).then((f) => { un = f; });
+    return () => { un?.(); };
+  }, []);
+
   // --- The voice lifecycle (ported from the old main-window useVoiceInput hook) ---
   useEffect(() => {
     // Finish + paste: stop recording, transcribe, (optionally translate), paste.
@@ -194,6 +216,10 @@ export default function RecordingOverlay() {
         announce('transcribing');
         const { blob, voicedMs, hadSpeech } = await stopRecording();
         void restoreAudio(); // recording done -> restore audio right away
+        // The transcript window's job ended with the recording. Leaving it up while the paste
+        // pipeline runs made the whole feature look like it was still listening.
+        setLiveText('');
+        void invoke('hide_transcript').catch(() => { /* cosmetic */ });
 
         // Min-duration guard: only trust the VAD's "no speech" when THIS stop was the VAD's own
         // decision (auto). On a MANUAL finish (Done / Enter / re-press) the user stopped on
@@ -213,7 +239,15 @@ export default function RecordingOverlay() {
         // path on ANY local failure — with a console warning, never silently worse
         // than before the feature existed.
         let rawTranscript: string;
-        if (['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine)) {
+        if (liveRef.current?.isActive) {
+          // The text has been accumulating the whole time the user was speaking; finishing
+          // flushes the recogniser's look-ahead and returns the final version. The recogniser
+          // shouts (its vocabulary is upper case) — fix that before ANYTHING else touches the
+          // text, because corrections, cleanup, translation and the paste are all downstream.
+          const session = liveRef.current;
+          liveRef.current = null;
+          rawTranscript = humanizeTranscript(await session.finish(), true);
+        } else if (['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine)) {
           try {
             const t0 = performance.now();
             const samplesB64 = await blobToPcm16kBase64(blob);
@@ -356,7 +390,11 @@ export default function RecordingOverlay() {
         const cfg = payload.config;
         const eng = cfg.voiceSttEngine;
         setEngineTag(
-          ['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(eng) ? 'offline'
+          // Live mode names its model outright: it behaves differently enough (streaming,
+          // upper-case vocabulary, on-device) that "which engine heard me?" is the first
+          // debugging question, and the tag answers it before it gets asked.
+          cfg.voiceLiveMode ? 'live · zipformer'
+          : ['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(eng) ? 'offline'
           : eng === 'groq' ? ((cfg.apiKeys.groq || '').trim() ? 'Groq' : 'server')
           : eng === 'openai' ? ((cfg.apiKeys.openai || '').trim() ? 'OpenAI' : 'server')
           : (cfg.apiKeys.groq || '').trim() ? 'Groq'
@@ -382,6 +420,20 @@ export default function RecordingOverlay() {
       // Start the mute WITHOUT awaiting it and open the microphone at the same time. The mute
       // only has to be finished before the first captured chunk, not before the mic opens, so
       // serialising the two was ~233ms of pure latency. beforeStart below re-imposes the order.
+      // Live dictation. All the startup/queueing subtleties live in LiveSession — see the
+      // header comment there before changing the ordering here.
+      const wantLive = !!payload.config.voiceLiveMode;
+      liveRef.current = null;
+      setLiveText('');
+      if (wantLive) {
+        const session = new LiveSession();
+        liveRef.current = session;
+        session.begin((e) => {
+          console.warn('[Voice] live mode unavailable, using one-shot transcription:', e);
+          liveRef.current = null;
+        });
+      }
+
       muteSessionRef.current += 1;
       muteGateRef.current = setSystemMute(true);
       if (cancelledRef.current || finishedRef.current) { void restoreAudio(); return; }
@@ -416,6 +468,7 @@ export default function RecordingOverlay() {
             }
           },
           onLevel: (b) => { setBars(b); }, // local only — this window renders the bars
+          onPcmChunk: wantLive ? (pcm) => liveRef.current?.feed(pcm) : undefined,
         });
         // Cancel may have landed while startRecording() was opening the mic (cancelRecording()
         // was then a no-op because the recorder didn't exist yet). Tear the now-live recorder down.
@@ -475,6 +528,26 @@ export default function RecordingOverlay() {
   // One-word engine tag shown next to the status ("· offline" / "· Groq" / "· server") —
   // the INTENDED engine at start; a mid-process fallback is reported via console/Settings.
   const [engineTag, setEngineTag] = useState('');
+  // Provisional text while speaking. Kept separate from `message` so the status line and the
+  // transcript never fight over the same slot.
+  const [liveText, setLiveText] = useState('');
+  const liveRef = useRef<LiveSession | null>(null);
+
+  // The transcript lives in its OWN window below this one (see TranscriptOverlay). Growing
+  // this pill to fit a sentence pushed the text over the level bars and the done/cancel
+  // buttons — the things being watched while speaking.
+  //
+  // Shown ONCE per session, not on every text change. This effect used to run show_transcript
+  // on each partial — five times a second — and macOS re-showing an already-visible window
+  // makes it flicker. That was the "coarse, rewriting-from-scratch blink": the WINDOW was
+  // blinking, not the text.
+  const transcriptShownRef = useRef(false);
+  useEffect(() => {
+    if (liveText.trim().length > 0 && !transcriptShownRef.current) {
+      transcriptShownRef.current = true;
+      void invoke('show_transcript').catch(() => { /* cosmetic */ });
+    }
+  }, [liveText]);
   useEffect(() => {
     if (status !== 'recording' || !recStartedAt) { setElapsed(0); return; }
     setElapsed(0);
@@ -551,7 +624,7 @@ export default function RecordingOverlay() {
               onClick={() => processHandlerRef.current()}
               title="Done — Enter, or press the voice shortcut again (works from any app)"
               aria-label="Done"
-              className="flex items-center justify-center w-6 h-6 rounded-md bg-green-500/20 hover:bg-green-500/35 text-green-300 leading-none cursor-pointer transition-colors"
+              className="flex items-center justify-center w-6 h-6 rounded-md bg-green-500/20 hover:bg-green-500/35 active:scale-90 active:bg-green-500/50 text-green-300 leading-none cursor-pointer transition-all duration-100"
             >
               <Check size={14} />
             </button>
@@ -562,7 +635,7 @@ export default function RecordingOverlay() {
             onClick={() => cancelHandlerRef.current()}
             title="Cancel (Esc)"
             aria-label="Cancel (Esc)"
-            className="flex items-center justify-center w-6 h-6 rounded-md bg-red-500/20 hover:bg-red-500/35 text-red-300 leading-none cursor-pointer transition-colors"
+            className="flex items-center justify-center w-6 h-6 rounded-md bg-red-500/20 hover:bg-red-500/35 active:scale-90 active:bg-red-500/50 text-red-300 leading-none cursor-pointer transition-all duration-100"
           >
             <X size={14} />
           </button>

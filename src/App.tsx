@@ -14,6 +14,7 @@ import Settings from './components/Settings';
 import TranslationPopup from './components/TranslationPopup';
 import LoadingOverlay from './components/LoadingOverlay';
 import RecordingOverlay from './components/RecordingOverlay';
+import { TranscriptOverlay } from '@/components/TranscriptOverlay';
 import { Paywall } from './components/Paywall';
 import UpdateModal from './components/UpdateModal';
 import logo from '@/assets/logo.png';
@@ -29,7 +30,7 @@ function App() {
   // Check if this is the main settings window (not popup or loading)
   // Shortcuts should ONLY be registered in the main window to avoid conflicts
   const hash = window.location.hash;
-  const isMainWindow = hash !== '#/popup' && hash !== '#/loading' && hash !== '#/recording';
+  const isMainWindow = hash !== '#/popup' && hash !== '#/loading' && hash !== '#/recording' && hash !== '#/transcript';
 
   // In-app auto-update (main window only): auto-checks then shows a confirm modal.
   const updater = useUpdater(isMainWindow);
@@ -243,6 +244,10 @@ function App() {
 
   if (hash === '#/loading') {
     return <LoadingOverlay />;
+  }
+
+  if (hash === '#/transcript') {
+    return <TranscriptOverlay />;
   }
 
   if (hash === '#/recording') {

@@ -18,6 +18,10 @@ enum ModelKind {
     NemoTransducer,
     /// OpenAI Whisper (turbo): encoder/decoder + tokens.txt; honors a language hint
     Whisper,
+    /// Streaming Zipformer transducer, for LIVE dictation rather than one-shot transcription.
+    /// Listed here so it reuses the download, progress, status and SHA-256 verification the
+    /// other models already get; it is driven by stt_stream.rs, not by transcribe_local.
+    StreamingTransducer,
 }
 
 /// One downloadable file of a model.
@@ -111,6 +115,36 @@ const MODELS: &[ModelSpec] = &[
                 url: "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt?download=true",
                 sha256: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
                 size_hint: 200_000,
+            },
+        ],
+    },
+    ModelSpec {
+        id: "streaming-multi",
+        kind: ModelKind::StreamingTransducer,
+        files: &[
+            ModelFile {
+                name: "encoder-epoch-75-avg-11-chunk-16-left-128.int8.onnx",
+                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10/resolve/c6726c1147387ad2a11148b33973135d92a55e6c/encoder-epoch-75-avg-11-chunk-16-left-128.int8.onnx?download=true",
+                sha256: "f9001ed7a9e46d0294438c1a30cd7c72d1cc4bdd4e7880edbcda36f67081e32e",
+                size_hint: 296_583_597,
+            },
+            ModelFile {
+                name: "decoder-epoch-75-avg-11-chunk-16-left-128.onnx",
+                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10/resolve/c6726c1147387ad2a11148b33973135d92a55e6c/decoder-epoch-75-avg-11-chunk-16-left-128.onnx?download=true",
+                sha256: "7ebc63f34b21c8efb4a41a5a2eee7fe1448829ce0230ecc5369e67fc14d90d48",
+                size_hint: 33_837_085,
+            },
+            ModelFile {
+                name: "joiner-epoch-75-avg-11-chunk-16-left-128.int8.onnx",
+                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10/resolve/c6726c1147387ad2a11148b33973135d92a55e6c/joiner-epoch-75-avg-11-chunk-16-left-128.int8.onnx?download=true",
+                sha256: "db88e3172323551abaa99b91b18fb422a27ea4a834fd0db10389f9478816f917",
+                size_hint: 8_257_421,
+            },
+            ModelFile {
+                name: "tokens.txt",
+                url: "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-ar_en_id_ja_ru_th_vi_zh-2025-02-10/resolve/c6726c1147387ad2a11148b33973135d92a55e6c/tokens.txt?download=true",
+                sha256: "784f24950f6bcce1b0021035632dd60fd4617ecd8ca0581ab57d7b39d77ba5ab",
+                size_hint: 195_244,
             },
         ],
     },
@@ -287,6 +321,11 @@ pub async fn transcribe_local(
             num_threads: 4,
             ..Default::default()
         },
+        ModelKind::StreamingTransducer => {
+            // Wrong entry point: this model is decoded incrementally by stt_stream.rs. Loading
+            // it as an offline recogniser would fail deep inside sherpa with an unhelpful error.
+            return Err("model ini untuk mode live, bukan transkripsi sekali jalan".into());
+        }
         ModelKind::NemoTransducer => OfflineModelConfig {
             transducer: OfflineTransducerModelConfig {
                 encoder: Some(p("encoder.int8.onnx")),

@@ -9,6 +9,7 @@ mod tray;
 mod plugins;
 mod mouse_hook;
 mod stt;
+mod stt_stream;
 mod mt;
 
 use tauri_plugin_autostart::MacosLauncher;
@@ -39,6 +40,9 @@ fn main() {
             // Pre-create the hidden voice recording overlay so it shows instantly
             // (non-activating) without bringing the main window forward.
             commands::ensure_recording_window(&app.handle());
+            // Same reason as the pill above: created up front so the first live word is not waiting
+            // on a window being built.
+            commands::ensure_transcript_window(&app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -57,9 +61,16 @@ fn main() {
             commands::show_settings_window,
             commands::hide_settings_window,
             commands::quit_app,
+            commands::show_transcript,
+            commands::hide_transcript,
             secrets::secret_set,
             secrets::secret_get,
             secrets::secret_delete,
+            stt_stream::stream_stt_start,
+            stt_stream::stream_stt_push,
+            stt_stream::stream_stt_finish,
+            stt_stream::stream_stt_cancel,
+            stt_stream::stream_stt_release,
             commands::show_popup,
             commands::hide_popup,
             commands::show_loading,

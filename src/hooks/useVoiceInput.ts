@@ -61,6 +61,7 @@ export interface VoiceStartPayload {
     voiceSoundEnabled: boolean;
     micAutoGain: boolean;       // AGC: boost quiet mics (single mic knob)
     voiceSttEngine: string;     // 'auto' | 'omnilingual-300m' (offline, experimental)
+    voiceLiveMode: boolean;     // live dictation (dev only for now)
     voiceCleanup: boolean;      // Original mode: AI transcript proofreading
     customBaseURL: string; // for provider === 'custom' (voice→translate step)
     customModel: string;
@@ -93,7 +94,7 @@ export function useVoiceInput() {
   }, [endSession]);
 
   const toggleVoice = useCallback(async (mode: VoiceMode) => {
-    const { isRecording, apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, voicePopupPosition, micAutoGain, voiceSttEngine, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, customBaseURL, customModel } =
+    const { isRecording, apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, voicePopupPosition, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, customBaseURL, customModel } =
       useAppStore.getState();
     // Per-user cap from Settings (minutes -> ms); falls back to the built-in default.
     const voiceMaxMs = (voiceMaxMinutes && voiceMaxMinutes >= 1 ? voiceMaxMinutes : DEFAULT_VOICE_MAX_MINUTES) * 60_000;
@@ -154,7 +155,7 @@ export function useVoiceInput() {
       mode,
       targetApp,
       targetPos,
-      config: { apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceCleanup, voiceMaxMs, voiceSilenceMs, micDeviceId, voiceCorrections, customBaseURL, customModel },
+      config: { apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMs, voiceSilenceMs, micDeviceId, voiceCorrections, customBaseURL, customModel },
     };
     void emitTo('recording', 'voice-start', payload);
     // Cold-start insurance: Tauri events aren't buffered, so if the overlay's listener wasn't

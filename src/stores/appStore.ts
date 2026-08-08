@@ -76,6 +76,9 @@ interface AppState {
   voiceSoundEnabled: boolean; // sound when voice recording starts/stops
   micAutoGain: boolean;       // single mic knob: boost quiet mics (AGC) so speech is heard
   voiceSttEngine: string;     // 'auto' (online: BYOK/server) | 'omnilingual-300m' (offline, experimental)
+  // Live dictation: text appears while you speak, still pasted once at the end. Development
+  // only for now — the toggle is hidden in production builds until it has been used in anger.
+  voiceLiveMode: boolean;
   voiceCleanup: boolean;      // Original mode: AI proofreads the transcript (mishearings/punctuation only)
   isRecording: boolean;
   voiceStatus: VoiceStatus;
@@ -144,6 +147,7 @@ interface AppState {
   setVoiceSoundEnabled: (enabled: boolean) => void;
   setMicAutoGain: (enabled: boolean) => void;
   setVoiceSttEngine: (engine: string) => void;
+  setVoiceLiveMode: (voiceLiveMode: boolean) => void;
   setVoiceCleanup: (enabled: boolean) => void;
   setUiFont: (font: string) => void;
   setUiScale: (scale: string) => void;
@@ -224,6 +228,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   voiceSoundEnabled: DEFAULT_VOICE_SOUND_ENABLED,
   micAutoGain: DEFAULT_MIC_AUTO_GAIN,
   voiceSttEngine: 'auto',
+  voiceLiveMode: false,
   voiceCleanup: false,
   uiFont: DEFAULT_UI_FONT,
   uiScale: DEFAULT_UI_SCALE,
@@ -295,6 +300,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setVoiceSoundEnabled: (voiceSoundEnabled) => set({ voiceSoundEnabled }),
   setMicAutoGain: (micAutoGain) => set({ micAutoGain }),
   setVoiceSttEngine: (voiceSttEngine) => set({ voiceSttEngine }),
+  setVoiceLiveMode: (voiceLiveMode) => set({ voiceLiveMode }),
   setVoiceCleanup: (voiceCleanup) => set({ voiceCleanup }),
   setUiFont: (uiFont) => set({ uiFont }),
   setUiScale: (uiScale) => set({ uiScale }),

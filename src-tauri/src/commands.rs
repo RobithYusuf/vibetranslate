@@ -514,6 +514,100 @@ pub fn ensure_recording_window(app: &AppHandle) {
     }
 }
 
+// Live-transcript overlay: its OWN window, sitting just below the listening pill.
+//
+// The first attempt grew the pill itself to fit the text. It worked, but the text crowded the
+// level bars and the done/cancel buttons — the thing the user is actually looking at while
+// speaking. Keeping them separate means the listening indicator is byte-for-byte what it was
+// before live dictation existed, and the transcript can be as tall as it likes.
+pub fn ensure_transcript_window(app: &AppHandle) {
+    if app.get_webview_window("transcript").is_some() {
+        return;
+    }
+    #[allow(unused_mut)]
+    let mut builder =
+        WebviewWindowBuilder::new(app, "transcript", WebviewUrl::App("index.html#/transcript".into()))
+            .title("")
+            .inner_size(520.0, 74.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .focused(false)
+            .skip_taskbar(true)
+            .visible(false);
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.visible_on_all_workspaces(true);
+    }
+
+    if let Ok(window) = builder.build() {
+        #[cfg(target_os = "macos")]
+        set_overlay_level(&window);
+    }
+}
+
+/// Place it under the listening pill, centred on the same monitor.
+fn position_transcript_window(app: &AppHandle) {
+    let (Some(rec), Some(tr)) = (
+        app.get_webview_window("recording"),
+        app.get_webview_window("transcript"),
+    ) else {
+        return;
+    };
+    let Some(monitor) = active_monitor(&rec) else { return };
+    let r = monitor_rect(&monitor);
+    let (rw, rh) = window_size_in_space(&rec);
+    let (tw, _) = window_size_in_space(&tr);
+
+    // Read the pill's actual position rather than recomputing it: the user can choose top,
+    // centre or bottom, and guessing would put the transcript in the wrong place for two of
+    // the three.
+    let (rx, ry) = match rec.outer_position() {
+        Ok(p) => {
+            #[cfg(target_os = "macos")]
+            {
+                let sc = rec.scale_factor().unwrap_or(1.0).max(0.5);
+                (p.x as f64 / sc, p.y as f64 / sc)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                (p.x as f64, p.y as f64)
+            }
+        }
+        Err(_) => (r.x + (r.w - rw) / 2.0, r.y + r.h / 12.0),
+    };
+    let x = (rx + (rw - tw) / 2.0).max(r.x);
+    let y = ry + rh + 8.0;
+    set_window_pos(&tr, x, y);
+}
+
+#[tauri::command]
+pub async fn show_transcript(app: AppHandle) -> Result<(), String> {
+    ensure_transcript_window(&app);
+    position_transcript_window(&app);
+    if let Some(w) = app.get_webview_window("transcript") {
+        let _ = w.set_always_on_top(true);
+        w.show().map_err(|e| e.to_string())?;
+        #[cfg(target_os = "macos")]
+        set_overlay_level(&w);
+    }
+    // Showing a window can hand it the keyboard, and this one has no reason to hold it: the
+    // listening pill is where Enter and Esc belong. Give focus straight back.
+    if let Some(rec) = app.get_webview_window("recording") {
+        let _ = rec.set_focus();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn hide_transcript(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("transcript") {
+        w.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // Recording overlay: small non-activating indicator. `position` = "top" | "center" | "bottom".
 #[tauri::command]
 pub async fn show_recording(app: AppHandle, position: Option<String>) -> Result<(), String> {

@@ -54,6 +54,7 @@ export function useSettings() {
     micAutoGain,
     voiceSttEngine,
     voiceCleanup,
+    voiceLiveMode,
     uiFont,
     uiScale,
     soundEnabled,
@@ -197,6 +198,9 @@ export function useSettings() {
           if ((settings as { voiceSttEngine?: string }).voiceSttEngine !== undefined) {
             useAppStore.getState().setVoiceSttEngine((settings as { voiceSttEngine?: string }).voiceSttEngine!);
           }
+          if ((settings as { voiceLiveMode?: boolean }).voiceLiveMode !== undefined) {
+            useAppStore.getState().setVoiceLiveMode(!!(settings as { voiceLiveMode?: boolean }).voiceLiveMode);
+          }
           if ((settings as { voiceCleanup?: boolean }).voiceCleanup !== undefined) {
             useAppStore.getState().setVoiceCleanup((settings as { voiceCleanup?: boolean }).voiceCleanup!);
           }
@@ -291,6 +295,7 @@ export function useSettings() {
       enhanceEnabled,
       enhanceShortcut,
       voiceEnabled,
+      voiceLiveMode,
       voiceShortcut,
       voiceOriginalShortcut,
       voiceAutoStop,
@@ -313,7 +318,7 @@ export function useSettings() {
     console.log('[Settings] Saving settings:', { ...settings, apiKeys: '***', licenseKey: licenseKey ? '***' : null });
     await saveSettings(settings as unknown as Settings);
     console.log('[Settings] Saved successfully');
-  }, [licenseKey, licenseStatus, appEnabled, uiLanguage, apiKeys, provider, model, customBaseURL, customModel, shortcut, popupShortcut, terminalShortcut, sourceLang, targetLang, autoStart, enhanceEnabled, enhanceShortcut, voiceEnabled, voiceShortcut, voiceOriginalShortcut, voiceAutoStop, voicePopupPosition, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, uiFont, uiScale, soundEnabled, loadingEnabled, autoUpdateCheck, skippedUpdateVersion]);
+  }, [licenseKey, licenseStatus, appEnabled, uiLanguage, apiKeys, provider, model, customBaseURL, customModel, shortcut, popupShortcut, terminalShortcut, sourceLang, targetLang, autoStart, enhanceEnabled, enhanceShortcut, voiceEnabled, voiceShortcut, voiceOriginalShortcut, voiceAutoStop, voicePopupPosition, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, uiFont, uiScale, soundEnabled, loadingEnabled, autoUpdateCheck, skippedUpdateVersion]);
 
   return { save };
 }

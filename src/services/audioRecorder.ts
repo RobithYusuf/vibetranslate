@@ -54,6 +54,10 @@ import { MicVAD } from '@ricky0123/vad-web';
 export type AutoStopReason = 'silence' | 'nospeech' | 'maxed';
 
 interface StartOptions {
+  /// Called with ~200ms of 16kHz mono PCM16 while recording, for live transcription. Tapped
+  /// AFTER the gain/limiter so the live text hears exactly the audio the final recording
+  /// contains — tapping the raw mic instead would make the preview disagree with the result.
+  onPcmChunk?: (pcm: Int16Array) => void;
   // Awaited immediately before the recorder starts capturing, and allowed to throw to abort.
   // The caller uses it to keep "system output is muted before the first chunk" true while
   // doing the mute concurrently with opening the microphone, and to bail if the user
@@ -94,6 +98,7 @@ let safetyTimer: ReturnType<typeof setTimeout> | null = null;
 // Separate AudioContext that applies the software "boost" gain to the RECORDED path
 // only (raw stream still feeds the VAD/meter untouched). null when boost is off.
 let boostContext: AudioContext | null = null;
+let pcmTap: ScriptProcessorNode | null = null;
 
 let audioContext: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
@@ -153,6 +158,7 @@ function teardownAudioGraph() {
 function cleanup() {
   if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
   teardownAudioGraph();
+  if (pcmTap) { try { pcmTap.disconnect(); } catch { /* */ } pcmTap.onaudioprocess = null; pcmTap = null; }
   if (boostContext) { boostContext.close().catch(() => {}); boostContext = null; }
   if (mediaStream) { mediaStream.getTracks().forEach((t) => t.stop()); mediaStream = null; }
   mediaRecorder = null;
@@ -562,6 +568,44 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
       gain.connect(limiter);
       limiter.connect(dest);
       recordStream = dest.stream;
+
+      // Live-dictation tap. Resampled to 16kHz here rather than in Rust: the recogniser wants
+      // 16k, and doing it once at the source keeps every chunk a whole number of samples.
+      if (opts.onPcmChunk) {
+        const ctx = boostContext;
+        const inRate = ctx.sampleRate;
+        const node = ctx.createScriptProcessor(4096, 1, 1);
+        let carry: number[] = [];
+        const RATIO = inRate / 16000;
+        node.onaudioprocess = (ev) => {
+          const input = ev.inputBuffer.getChannelData(0);
+          // Cheap decimation with a fractional cursor. Good enough for ASR features, and far
+          // cheaper than an OfflineAudioContext resample on every 85ms block.
+          for (let i = 0; i < input.length; i += RATIO) {
+            carry.push(input[Math.floor(i)]);
+          }
+          // ~200ms at 16kHz. Smaller chunks mean more IPC for no perceptible gain; larger
+          // ones make the live text visibly lag behind the voice.
+          while (carry.length >= 3200) {
+            const slice = carry.slice(0, 3200);
+            carry = carry.slice(3200);
+            const pcm = new Int16Array(slice.length);
+            for (let i = 0; i < slice.length; i++) {
+              const v = Math.max(-1, Math.min(1, slice[i]));
+              pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+            }
+            opts.onPcmChunk?.(pcm);
+          }
+        };
+        limiter.connect(node);
+        // ScriptProcessor only runs while connected to a destination; a zero gain keeps it
+        // alive without adding the microphone to the speakers.
+        const sink = ctx.createGain();
+        sink.gain.value = 0;
+        node.connect(sink);
+        sink.connect(ctx.destination);
+        pcmTap = node;
+      }
     } catch (e) {
       console.warn('[Voice] mic boost graph failed, recording raw:', e);
       if (boostContext) { boostContext.close().catch(() => {}); boostContext = null; }

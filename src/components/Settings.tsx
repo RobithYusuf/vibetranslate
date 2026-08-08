@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { warmLive, releaseLive } from '@/services/sttStream';
 import { 
   Key, Languages, Keyboard, Sparkles, Copy, Power, Globe, Shield,
   Volume2, Loader2, CheckCircle, XCircle, BookOpen, MessageSquare, MousePointer, AlertTriangle, Mic, Palette, ChevronRight, RefreshCw, X,
@@ -97,6 +98,8 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     setVoiceSttEngine,
     setApiKeyFor,
     voiceCleanup,
+    voiceLiveMode,
+    setVoiceLiveMode,
     setVoiceCleanup,
     setVoiceMaxMinutes,
     setVoiceSilenceSec,
@@ -236,6 +239,10 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     'omnilingual-300m': { size: '348 MB' },
     'whisper-turbo': { size: '987 MB' },
     'parakeet-v3': { size: '640 MB' },
+    // The live-dictation model. Listed here so it shares the status check and the download
+    // progress plumbing; it is not offered in the one-shot engine dropdown because it is a
+    // streaming model driven by the live path, not by transcribe_local.
+    'streaming-multi': { size: '340 MB' },
   };
   const [sttReady, setSttReady] = useState<Record<string, boolean>>({});
   const [sttDl, setSttDl] = useState<{ received: number; total: number } | null>(null);
@@ -1342,6 +1349,47 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                         </div>
                         <span className="text-[10px] text-white/35 leading-snug block mt-0.5">{t('micBoostDesc')}</span>
                       </div>
+                    </div>
+
+                    {/* Live dictation (Beta). The toggle only arms once its model is on disk:
+                        340MB is not something to fetch silently on a toggle flip, and a user on
+                        a metered connection deserves the number before the download. */}
+                    <div className="bg-[#1e1e1e] rounded-md px-2.5 py-2 border border-amber-500/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[12px] text-amber-300/90 truncate">
+                          {t('voiceLiveLabel')}
+                        </span>
+                        {sttReady['streaming-multi'] === false ? (
+                          sttDl ? (
+                            <span className="text-[10px] text-white/40 tabular-nums shrink-0">
+                              {Math.round((sttDl.received / Math.max(1, sttDl.total)) * 100)}%
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setSttDl({ received: 0, total: 1 }); void invoke('download_stt_model', { modelId: 'streaming-multi' }).catch(() => setSttDl(null)); }}
+                              className="text-[10px] text-cyan-300/90 hover:text-cyan-200 underline underline-offset-2 cursor-pointer shrink-0"
+                            >
+                              {t('voiceLiveDownload')}
+                            </button>
+                          )
+                        ) : (
+                          <Toggle
+                            enabled={voiceLiveMode}
+                            onChange={(on) => {
+                              setVoiceLiveMode(on);
+                              // Load now, while the user is still in Settings, rather than on
+                              // the first shortcut press when they are already talking.
+                              if (on) void warmLive().catch(() => { /* first use will load it */ });
+                              else void releaseLive().catch(() => { /* */ });
+                            }}
+                            size="sm"
+                          />
+                        )}
+                      </div>
+                      <span className="text-[10px] text-white/35 leading-snug block mt-0.5">
+                        {t('voiceLiveHint')}
+                      </span>
                     </div>
 
                     {/* Correction dictionary — collapsible so it doesn't dominate the section */}
