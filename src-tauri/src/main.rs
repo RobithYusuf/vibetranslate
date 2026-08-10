@@ -37,6 +37,15 @@ fn main() {
             // forward/middle) trigger a shortcut system-wide. Inactive if Accessibility isn't
             // granted yet; the frontend can retry via restart_mouse_hook.
             mouse_hook::start(app.handle().clone());
+            // Drop the default app menu everywhere but macOS. Windows and Linux draw it
+            // as a bar INSIDE the settings window, and Tauri's default carries File →
+            // Close Window/Quit items that bypass our hide-on-close interception — a
+            // Windows user picked one and the whole app exited (issue #14). macOS keeps
+            // it: there the menu lives in the global bar and supplies the standard
+            // Cmd+C/V/Q behaviour users expect.
+            #[cfg(not(target_os = "macos"))]
+            let _ = app.handle().remove_menu();
+
             // Pre-create the hidden voice recording overlay so it shows instantly
             // (non-activating) without bringing the main window forward.
             commands::ensure_recording_window(&app.handle());
@@ -106,6 +115,16 @@ fn main() {
             mac_rounded_corners::enable_modern_window_style,
             mac_rounded_corners::reposition_traffic_lights,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // Exits that go through Tauri's own path — the macOS menu's Cmd+Q, an OS
+            // shutdown — never reach quit_app or the tray handler, and both exist to
+            // restore the system mute a voice session may be holding. Without this, a
+            // Cmd+Q mid-dictation left the machine silent (same failure class as
+            // issue #14, just on the other platform).
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                commands::release_mute_if_held();
+            }
+        });
 }
