@@ -21,11 +21,21 @@ import logo from '@/assets/logo.png';
 
 function App() {
   const { shortcut, popupShortcut, terminalShortcut, enhanceEnabled, enhanceShortcut, appEnabled,
-    voiceEnabled, voiceShortcut, voiceOriginalShortcut, uiFont, uiScale, recordingShortcut } = useAppStore();
+    voiceEnabled, voiceShortcut, voiceOriginalShortcut, uiFont, uiScale, recordingShortcut,
+    voiceLiveMode } = useAppStore();
   const { translate, translatePopup, translateTerminal, enhance, enhancePopup, enhanceTerminal } = useTranslation();
   const { voiceTranslate, voiceOriginal } = useVoiceInput();
   const { loading: statusLoading, shouldShowPaywall, checkStatus } = useAppStatus();
   const [paywallDismissed, setPaywallDismissed] = useState(false);
+
+  // The live transcript overlay is built when live mode is ON — here on startup, and again
+  // when the toggle flips — never when a dictation starts. Creating it 1.4s before showing it
+  // was not enough time for React to mount, and the user got a blank white rectangle. Users
+  // who never enable live dictation still never pay for the window.
+  useEffect(() => {
+    if (!voiceLiveMode) return;
+    void invoke('prepare_transcript_window').catch(() => {});
+  }, [voiceLiveMode]);
 
   // Check if this is the main settings window (not popup or loading)
   // Shortcuts should ONLY be registered in the main window to avoid conflicts

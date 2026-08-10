@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.46',
+    date: '2026-08-11',
+    changes: [
+      'Uses much less memory. The speech model is now released after a few minutes idle instead of being held for the rest of the session, and the live transcript window is only created if you actually use live dictation',
+      'Starting a dictation right after that release still catches your first words — the audio waits while the model reloads',
+    ],
+  },
+  {
     version: '1.0.45',
     date: '2026-08-10',
     changes: [

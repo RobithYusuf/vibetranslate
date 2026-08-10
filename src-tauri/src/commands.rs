@@ -533,6 +533,19 @@ pub fn ensure_recording_window(app: &AppHandle) {
     }
 }
 
+/// Build the transcript overlay ahead of its first use.
+///
+/// Called when live dictation is ENABLED — at startup if the setting is already on, and the
+/// moment the toggle is switched on — not when a dictation begins. It costs a whole WebKit
+/// content process (~25MB) and only live mode ever shows it, so users who never turn live
+/// dictation on never pay for it; but building it 1.4s before it is shown was too late, and
+/// the window appeared as a blank white rectangle while React was still mounting.
+#[tauri::command]
+pub async fn prepare_transcript_window(app: AppHandle) -> Result<(), String> {
+    ensure_transcript_window(&app);
+    Ok(())
+}
+
 // Live-transcript overlay: its OWN window, sitting just below the listening pill.
 //
 // The first attempt grew the pill itself to fit the text. It worked, but the text crowded the
@@ -553,6 +566,11 @@ pub fn ensure_transcript_window(app: &AppHandle) {
             .always_on_top(true)
             .focused(false)
             .skip_taskbar(true)
+            // Paint the native window in the overlay's own colour BEFORE any web content
+            // exists. Without it a window shown before React has mounted is a blank WHITE
+            // rectangle — which is exactly what a user saw the moment this window stopped
+            // being created at startup.
+            .background_color(tauri::window::Color(28, 28, 30, 255))
             .visible(false);
 
     #[cfg(target_os = "macos")]

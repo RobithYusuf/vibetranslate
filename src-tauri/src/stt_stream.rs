@@ -32,6 +32,8 @@ struct Session {
     stream: OnlineStream,
     last_emitted: String,
     last_emit_at: std::time::Instant,
+    /// When this session last saw audio or a lifecycle call. Drives the idle eviction below.
+    last_used: std::time::Instant,
 }
 
 impl Session {
@@ -60,6 +62,50 @@ const TAIL_SILENCE_MS: usize = 500;
 
 /// The overlay only needs to look alive. More than this is wasted IPC and wasted React renders.
 const MIN_EMIT_INTERVAL_MS: u128 = 200;
+
+/// Drop the model after this long without a dictation.
+///
+/// It costs ~510MB of real footprint while loaded, and before this it stayed loaded for the
+/// rest of the session after a single dictation, even overnight. Evicting is close to free
+/// because reloading is not on any critical path: LiveSession starts recording immediately
+/// and queues audio while the model loads (~1.4s measured), so the user's first words are
+/// captured either way.
+///
+/// What eviction does NOT do — measured, see the note where it fires — is return the pages to
+/// the operating system. It caps growth rather than shrinking the process.
+const IDLE_EVICT_AFTER: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// The watchdog is spawned once, lazily, the first time a model is actually loaded.
+static EVICTOR_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn start_idle_evictor() {
+    if EVICTOR_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+        // A dictation in progress refreshes last_used every 200ms, so an idle check can
+        // never evict a session that is mid-utterance.
+        let idle = guard
+            .as_ref()
+            .map(|s| s.last_used.elapsed() >= IDLE_EVICT_AFTER)
+            .unwrap_or(false);
+        if idle {
+            *guard = None;
+            // Measured in the running app, not assumed: the footprint drops far less than the
+            // model's size (482MB -> 442MB), because macOS's allocator keeps the freed pages
+            // on its own free lists — vmmap shows them as MALLOC_SMALL/LARGE "(empty)". Asking
+            // for them back with malloc_zone_pressure_relief was tried and returns 0 bytes.
+            //
+            // Evicting still earns its keep: those pages are now REUSABLE, so the next model
+            // load lands in them instead of growing the process, and a session with many
+            // dictations plateaus instead of climbing. It just does not hand memory back to
+            // the machine, and this comment exists so nobody promises that it does.
+            dlog!("[LiveSTT] idle: model evicted (pages stay on the allocator's free list)");
+        }
+    });
+}
 
 fn model_dir(app: &tauri::AppHandle, id: &str) -> Result<std::path::PathBuf, String> {
     Ok(app
@@ -107,6 +153,7 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
         let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(s) = guard.as_mut() {
             s.renew(); // already warm: nothing to load, the shortcut is ready at once
+            s.last_used = std::time::Instant::now();
             return Ok(());
         }
     }
@@ -133,7 +180,9 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
         stream,
         last_emitted: String::new(),
         last_emit_at: std::time::Instant::now() - std::time::Duration::from_secs(1),
+        last_used: std::time::Instant::now(),
     });
+    start_idle_evictor();
     Ok(())
 }
 
@@ -170,6 +219,7 @@ pub async fn stream_stt_push(
             dlog!("[LiveSTT] push #{n}: {} samples @{}Hz rms={:.4}", samples.len(), sample_rate, rms);
         }
     }
+    s.last_used = std::time::Instant::now();
     s.stream.accept_waveform(sample_rate, &samples);
     while s.recognizer.is_ready(&s.stream) {
         s.recognizer.decode(&s.stream);
@@ -220,6 +270,7 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
     // stream_stt_release frees it when live dictation is switched off.
     if let Some(s) = guard.as_mut() {
         s.renew();
+        s.last_used = std::time::Instant::now();
     }
     let _ = app.emit(
         "live-transcript",
