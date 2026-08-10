@@ -12,6 +12,7 @@
 //! Flow, Superwhisper, Aqua Voice — shows live text in its own window and inserts once, at the
 //! end. The ones that type live (macOS Dictation, Windows Voice Access, VS Code Speech) can
 //! only do it because the OS or the editor owns the text model.
+use crate::dlog;
 use base64::Engine as _;
 use sherpa_onnx::{
     OnlineModelConfig, OnlineRecognizer, OnlineRecognizerConfig, OnlineStream,
@@ -72,6 +73,7 @@ fn model_dir(app: &tauri::AppHandle, id: &str) -> Result<std::path::PathBuf, Str
 
 #[tauri::command]
 pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result<(), String> {
+    dlog!("[LiveSTT] start requested: {model_id}");
     let dir = model_dir(&app, &model_id)?;
     let f = |n: &str| dir.join(n).to_string_lossy().to_string();
 
@@ -113,10 +115,12 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
     // Load OUTSIDE the lock. Holding it across the multi-second 340MB load parked every
     // other command on the mutex — pressing Esc during a cold start left stream_stt_cancel
     // blocked for the whole load, so the cancel visibly did nothing.
+    let t0 = std::time::Instant::now();
     let recognizer = tauri::async_runtime::spawn_blocking(move || OnlineRecognizer::create(&cfg))
         .await
         .map_err(|e| e.to_string())?
         .ok_or("gagal memuat model live")?;
+    dlog!("[LiveSTT] model loaded in {}ms", t0.elapsed().as_millis());
 
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = guard.as_mut() {
@@ -152,9 +156,21 @@ pub async fn stream_stt_push(
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     let Some(s) = guard.as_mut() else {
         // Not an error: a chunk in flight when the user cancelled is expected.
+        dlog!("[LiveSTT] push dropped: no session");
         return Ok(());
     };
 
+    // Kept after the outage it exposed: a JS-side bug meant this function was never called at
+    // all, and the only reason that was provable — rather than guessable against "the mic is
+    // broken" — was a counter that prints on chunk #0. dlog compiles away in release.
+    {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if n % 25 == 0 {
+            let rms = (samples.iter().map(|v| v * v).sum::<f32>() / samples.len().max(1) as f32).sqrt();
+            dlog!("[LiveSTT] push #{n}: {} samples @{}Hz rms={:.4}", samples.len(), sample_rate, rms);
+        }
+    }
     s.stream.accept_waveform(sample_rate, &samples);
     while s.recognizer.is_ready(&s.stream) {
         s.recognizer.decode(&s.stream);
@@ -164,6 +180,7 @@ pub async fn stream_stt_push(
         let changed = r.text != s.last_emitted && !r.text.is_empty();
         let due = s.last_emit_at.elapsed().as_millis() >= MIN_EMIT_INTERVAL_MS;
         if changed && due {
+            dlog!("[LiveSTT] partial: {:?}", &r.text.chars().take(60).collect::<String>());
             s.last_emitted = r.text.clone();
             s.last_emit_at = std::time::Instant::now();
             let _ = app.emit(
@@ -197,6 +214,7 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
         .get_result(&s.stream)
         .map(|r| r.text)
         .unwrap_or_default();
+    dlog!("[LiveSTT] finish: {} chars", text.len());
 
     // Kept loaded on purpose. Dropping it here would make the NEXT shortcut press wait for a
     // few hundred megabytes to load again — the delay the user loses their first words to.

@@ -100,6 +100,7 @@ let safetyTimer: ReturnType<typeof setTimeout> | null = null;
 let boostContext: AudioContext | null = null;
 let pcmTap: ScriptProcessorNode | null = null;
 
+
 /**
  * Attach the live-dictation PCM tap to a node in an audio graph. Resampled to 16kHz here
  * rather than in Rust: the recogniser wants 16k, and doing it once at the source keeps every

@@ -123,6 +123,16 @@ pub fn release_mute_if_held() {}
 /// Quit only closed the window: the app kept running in the tray, still holding Accessibility
 /// and still answering global shortcuts. A user who picks Quit and later finds it alive
 /// reasonably concludes it ignored them. Matches what the tray's Quit does.
+/// Debug bridge for the overlay webviews. Their console.log goes nowhere visible in
+/// `tauri dev` — the recording pill and transcript are separate windows with no devtools
+/// attached in normal use — so voice bugs had to be diagnosed by inference. JS calls this
+/// with one line; dlog prints it in debug builds and compiles to nothing in release.
+#[tauri::command]
+pub fn dev_log(msg: String) {
+    crate::dlog!("[JS] {}", msg);
+    let _ = msg; // dlog compiles away in release; keep the parameter used
+}
+
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
     release_mute_if_held();

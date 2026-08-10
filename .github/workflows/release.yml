@@ -59,6 +59,11 @@ jobs:
         run: node scripts/check-tauri-versions.mjs
       - name: Changelog entry must exist
         run: node scripts/changelog-notes.mjs "${GITHUB_REF_NAME#v}" >/dev/null
+      # 1.0.43 shipped with live dictation deaf: every fed audio chunk was dropped before it
+      # reached the recogniser. Preflight is ~20 seconds and blocks the whole release, which
+      # is exactly where a check this cheap belongs.
+      - name: Live dictation audio pump must deliver every chunk
+        run: node scripts/test-live-session.mjs
 
   build-macos-arm:
     needs: preflight

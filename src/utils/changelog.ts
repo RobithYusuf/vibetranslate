@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.44',
+    date: '2026-08-10',
+    changes: [
+      'Fixes live dictation, which was completely deaf in 1.0.43 — it recorded, showed the listening indicator, then returned nothing every time. If you turned Live dictation on, please update',
+      'A regression test now runs on every change and before every release, so this exact failure cannot ship again',
+    ],
+  },
+  {
     version: '1.0.43',
     date: '2026-08-10',
     changes: [

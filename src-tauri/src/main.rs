@@ -61,6 +61,7 @@ fn main() {
             commands::show_settings_window,
             commands::hide_settings_window,
             commands::quit_app,
+            commands::dev_log,
             commands::show_transcript,
             commands::hide_transcript,
             secrets::secret_set,

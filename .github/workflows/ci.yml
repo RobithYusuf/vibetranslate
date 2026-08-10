@@ -34,6 +34,10 @@ jobs:
       - run: node scripts/check-tauri-versions.mjs
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
+      # Behavioural check, not a type check. The live-dictation audio pump broke in a way
+      # tsc and the bundler both accepted happily — an async promise reset from inside its
+      # own body — and it shipped. Compilation was never the gate that was missing.
+      - run: node scripts/test-live-session.mjs
 
   rust:
     name: Check Rust (${{ matrix.os }})

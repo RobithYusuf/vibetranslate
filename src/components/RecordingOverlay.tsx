@@ -442,12 +442,14 @@ export default function RecordingOverlay() {
       // Live dictation. All the startup/queueing subtleties live in LiveSession — see the
       // header comment there before changing the ordering here.
       const wantLive = !!payload.config.voiceLiveMode;
+      void invoke('dev_log', { msg: `voice-start wantLive=${wantLive} engine=${payload.config.voiceSttEngine} mic=${payload.config.micDeviceId || 'default'} boost=${payload.config.micAutoGain}` }).catch(() => {});
       liveRef.current = null;
       setLiveText('');
       if (wantLive) {
         const session = new LiveSession();
         liveRef.current = session;
         session.begin((e) => {
+          void invoke('dev_log', { msg: `live unavailable: ${e}` }).catch(() => {});
           console.warn('[Voice] live mode unavailable, using one-shot transcription:', e);
           // Only detach OUR session: a stale rejection from a previous press must not
           // kill the live mode of the session that replaced it.

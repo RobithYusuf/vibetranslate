@@ -87,7 +87,13 @@ export class LiveSession {
 
   private drain(): Promise<void> {
     if (this.drainPromise) return this.drainPromise;
-    this.drainPromise = (async () => {
+    // The reset MUST live outside the async body. An async IIFE runs synchronously until its
+    // first await, so when there is nothing to drain — which is every call made while the
+    // model is still loading — the body reached `drainPromise = null` BEFORE the outer
+    // assignment overwrote it with the (already resolved) promise. From then on the guard
+    // above returned that stale promise forever and pushLive was never called again: the
+    // recogniser received zero audio and every dictation came back empty.
+    const run = async () => {
       while (this.active && this.queue.length) {
         const pcm = this.queue.shift();
         if (pcm) {
@@ -98,8 +104,11 @@ export class LiveSession {
           }
         }
       }
-      this.drainPromise = null;
-    })();
-    return this.drainPromise;
+    };
+    const p = run().finally(() => {
+      if (this.drainPromise === p) this.drainPromise = null;
+    });
+    this.drainPromise = p;
+    return p;
   }
 }
