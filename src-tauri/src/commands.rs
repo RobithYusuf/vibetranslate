@@ -754,6 +754,94 @@ pub async fn play_sound(sound_type: String) -> Result<(), String> {
     Ok(())
 }
 
+/// What macOS currently grants us. Reported so Settings can show the truth instead of a
+/// permanent "if it isn't working, try…" paragraph that is wrong half the time.
+///
+/// This matters more here than in a normally-signed app. Read straight out of the TCC
+/// database, our microphone grant stores this requirement:
+///
+///   FADE0C00 00000028 00000001 00000008 00000014 C9A1BC25…   (opcode 8 = cdhash, 20 bytes)
+///
+/// while every certificate-signed app on the same machine stores opcode 2 — an identifier
+/// plus certificate anchor. Ours is bound to the binary's own hash, so every update looks
+/// like a different app: the row survives with auth_value=2, System Settings keeps drawing
+/// the toggle ON, and the system denies anyway because it evaluates the requirement rather
+/// than the row. These APIs run that same evaluation, so they report the truth the settings
+/// panel does not.
+///
+/// Caveat for dev builds: a binary launched from a terminal has its TCC request attributed
+/// to the RESPONSIBLE process (the terminal), so `pnpm tauri:dev` reports the terminal's
+/// grants, not its own. Users never hit that path.
+#[derive(serde::Serialize, Default)]
+pub struct PermissionStatus {
+    /// Accessibility (keystroke simulation). false = shortcuts cannot type into other apps.
+    pub accessibility: bool,
+    /// "granted" | "denied" | "restricted" | "undetermined" | "unknown". Anything other
+    /// than "granted" means voice will record silence.
+    pub microphone: String,
+}
+
+#[tauri::command]
+pub fn permission_status() -> PermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        use objc::runtime::Object;
+        use objc::{msg_send, sel, sel_impl};
+
+        // AXIsProcessTrusted asks without prompting; the prompting variant would pop a dialog
+        // every time Settings opened. Apple declares it Boolean — an unsigned byte, not _Bool.
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn AXIsProcessTrusted() -> u8;
+        }
+        // Referencing the exported AVMediaTypeAudio constant does two jobs: it IS the media
+        // type string without allocating one — the alloc/init NSString it replaces was +1
+        // retained and never released, leaking once per poll — and it is a real linker
+        // symbol, so AVFoundation cannot silently fail to link the way an empty extern block
+        // permits.
+        #[link(name = "AVFoundation", kind = "framework")]
+        extern "C" {
+            static AVMediaTypeAudio: *const Object;
+        }
+        let accessibility = unsafe { AXIsProcessTrusted() != 0 };
+
+        // authorizationStatusForMediaType: only READS the stored decision. Opening the mic is
+        // what triggers the permission prompt, and that must stay tied to the user pressing
+        // the shortcut, never to viewing a settings page.
+        //
+        // Class::get, not class!(): the macro PANICS on a missing class, and this crate builds
+        // with panic = "abort", so one absent class would take the entire app down — on a path
+        // the Settings window polls. Reporting "unknown" is the honest failure.
+        let microphone = objc::rc::autoreleasepool(|| unsafe {
+            match objc::runtime::Class::get("AVCaptureDevice") {
+                None => "unknown".to_string(),
+                Some(cls) => {
+                    // AVAuthorizationStatus is NS_ENUM(NSInteger, …): isize is right by
+                    // construction rather than by 64-bit coincidence.
+                    let status: isize =
+                        msg_send![cls, authorizationStatusForMediaType: AVMediaTypeAudio];
+                    match status {
+                        0 => "undetermined",
+                        1 => "restricted", // policy/MDM — the user CANNOT grant this one
+                        2 => "denied",
+                        3 => "granted",
+                        _ => "unknown",
+                    }
+                    .to_string()
+                }
+            }
+        });
+
+        return PermissionStatus { accessibility, microphone };
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Windows and Linux have no equivalent gate for either capability.
+        PermissionStatus { accessibility: true, microphone: "granted".into() }
+    }
+}
+
 // Open macOS Accessibility Settings
 #[tauri::command]
 pub async fn open_accessibility_settings() -> Result<(), String> {

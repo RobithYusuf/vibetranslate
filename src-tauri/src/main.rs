@@ -81,6 +81,7 @@ fn main() {
             commands::set_audio_muted,
             commands::play_sound,
             commands::open_accessibility_settings,
+            commands::permission_status,
             mouse_hook::mouse_hook_active,
             mouse_hook::restart_mouse_hook,
             mouse_hook::set_mouse_bindings,

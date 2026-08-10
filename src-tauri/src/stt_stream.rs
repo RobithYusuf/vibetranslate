@@ -12,7 +12,6 @@
 //! Flow, Superwhisper, Aqua Voice — shows live text in its own window and inserts once, at the
 //! end. The ones that type live (macOS Dictation, Windows Voice Access, VS Code Speech) can
 //! only do it because the OS or the editor owns the text model.
-use crate::dlog;
 use base64::Engine as _;
 use sherpa_onnx::{
     OnlineModelConfig, OnlineRecognizer, OnlineRecognizerConfig, OnlineStream,

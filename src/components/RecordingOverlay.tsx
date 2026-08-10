@@ -347,7 +347,18 @@ export default function RecordingOverlay() {
         // wrote '' to the clipboard (destroying whatever the user had there), pasted
         // nothing, and played the success chime.
         if (!out.trim()) {
-          announce('error', 'No speech detected');
+          // Distinguish "you were quiet" from "macOS is not letting us hear you". Without an
+          // Apple certificate every update silently revokes the microphone grant while
+          // System Settings still shows it ON, so blaming the user's voice would be wrong
+          // far more often than it is right.
+          let reason = 'No speech detected';
+          try {
+            const p = await invoke<{ microphone: string }>('permission_status');
+            if (p.microphone === 'denied') reason = 'Microphone blocked — re-grant it in System Settings';
+            else if (p.microphone === 'restricted') reason = 'Microphone restricted by device policy';
+            else if (p.microphone === 'undetermined') reason = 'Microphone permission not granted yet';
+          } catch { /* status is a nicety; never let it swallow the real outcome */ }
+          announce('error', reason);
           finishSession('error');
           return;
         }

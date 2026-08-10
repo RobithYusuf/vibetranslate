@@ -131,6 +131,10 @@ export const translations = {
     note: 'Note:',
     
     // macOS Accessibility
+    permGranted: 'Granted',
+    permMissing: 'Not granted',
+    permMicDenied: 'Microphone access is blocked — voice features will record silence. Grant it in System Settings › Privacy & Security › Microphone.',
+    permMicRestricted: 'Microphone access is restricted by a device policy — you cannot change this yourself. Ask whoever manages this Mac.',
     macAccessibility: 'macOS Accessibility',
     macAccessibilityDesc: 'Required for keyboard shortcut simulation.',
     macAccessibilityHelp: 'Not working? Try remove & re-add app in settings. Restart app if still not working.',
@@ -403,6 +407,10 @@ export const translations = {
     note: 'Catatan:',
     
     // macOS Accessibility
+    permGranted: 'Diizinkan',
+    permMissing: 'Belum diizinkan',
+    permMicDenied: 'Akses mikrofon diblokir — fitur suara akan merekam keheningan. Izinkan di System Settings › Privacy & Security › Microphone.',
+    permMicRestricted: 'Akses mikrofon dibatasi kebijakan perangkat — kamu sendiri tidak bisa mengubahnya. Hubungi pengelola Mac ini.',
     macAccessibility: 'Aksesibilitas macOS',
     macAccessibilityDesc: 'Diperlukan untuk simulasi pintasan keyboard.',
     macAccessibilityHelp: 'Tidak berfungsi? Coba hapus & tambah ulang di pengaturan. Restart app jika masih bermasalah.',

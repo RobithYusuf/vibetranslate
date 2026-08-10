@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.45',
+    date: '2026-08-10',
+    changes: [
+      'macOS: Settings now shows whether VibeTranslate actually has Accessibility and Microphone permission, instead of a warning that appeared whether or not anything was wrong',
+      'When a dictation comes back empty, the app checks the permission first and says so — "Microphone blocked" instead of blaming your voice with "No speech detected"',
+      'Why this matters on macOS: VibeTranslate is not signed with a paid Apple certificate, so every update looks like a new app to the permission system and quietly drops your grants — while System Settings keeps showing the switch as on. The app can now tell you that; System Settings cannot',
+    ],
+  },
+  {
     version: '1.0.44',
     date: '2026-08-10',
     changes: [

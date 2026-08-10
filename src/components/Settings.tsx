@@ -244,6 +244,27 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     // streaming model driven by the live path, not by transcribe_local.
     'streaming-multi': { size: '340 MB' },
   };
+  // Live macOS permission state. Polled rather than read once: the user grants permission in
+  // System Settings — another app — so there is no event to listen for, and a card that
+  // still says "not granted" after they just granted it is worse than no card.
+  const [perms, setPerms] = useState<{ accessibility: boolean; microphone: string } | null>(null);
+  useEffect(() => {
+    if (navigator.platform.toUpperCase().indexOf('MAC') < 0) return;
+    const read = () => { void invoke<{ accessibility: boolean; microphone: string }>('permission_status').then(setPerms).catch(() => {}); };
+    read();
+    // Event-driven, NOT polled. Closing this window only hides it (see the CloseRequested
+    // handler in main.rs), so the component never unmounts and a setInterval here would keep
+    // calling into macOS forever behind a window nobody can see. Focus and visibility cover
+    // the only flow that matters: the user leaves for System Settings, grants, comes back.
+    const onWake = () => { if (document.visibilityState === 'visible') read(); };
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
+  }, []);
+
   const [sttReady, setSttReady] = useState<Record<string, boolean>>({});
   // Keyed by model id: two download UIs render from this (the engine card and the live
   // dictation row), and a single shared value made each show the OTHER's progress.
@@ -1521,16 +1542,33 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 <div className="bg-[#252526] rounded-lg p-4 space-y-3">
                   <div className="flex items-center gap-2.5">
                     {/* A shield read as "security warning"; this is a permission the user
-                        GRANTS, and macOS labels it with the same accessibility mark. The
-                        tinted badge also gives a 14px glyph enough weight to sit beside
-                        14px type instead of floating next to it. */}
-                    <span className="w-6 h-6 rounded-md bg-amber-500/15 border border-amber-500/25 grid place-items-center shrink-0">
-                      <Accessibility size={14} className="text-amber-400" />
+                        GRANTS, and macOS labels it with the same accessibility mark. */}
+                    <span className={`w-6 h-6 rounded-md border grid place-items-center shrink-0 ${
+                      perms?.accessibility ? 'bg-green-500/15 border-green-500/25' : 'bg-amber-500/15 border-amber-500/25'
+                    }`}>
+                      <Accessibility size={14} className={perms?.accessibility ? 'text-green-400' : 'text-amber-400'} />
                     </span>
                     <span className="text-[14px] font-medium text-white/80">{t('macAccessibility')}</span>
+                    {perms && (
+                      <span className={`ml-auto text-[10px] shrink-0 ${perms.accessibility ? 'text-green-400/90' : 'text-amber-400/90'}`}>
+                        ● {perms.accessibility ? t('permGranted') : t('permMissing')}
+                      </span>
+                    )}
                   </div>
                   <p className="text-[12px] text-white/50">{t('macAccessibilityDesc')}</p>
-                  <p className="text-[12px] text-amber-400/80">{t('macAccessibilityHelp')}</p>
+                  {/* The old copy showed "not working? remove & re-add" permanently, which
+                      was wrong whenever the permission was fine. Show it only when it IS
+                      missing — and say why it goes missing, because with an unsigned build
+                      every update silently revokes it. */}
+                  {perms && !perms.accessibility && (
+                    <p className="text-[12px] text-amber-400/80">{t('macAccessibilityHelp')}</p>
+                  )}
+                  {perms?.microphone === 'denied' && (
+                    <p className="text-[12px] text-red-400/90">{t('permMicDenied')}</p>
+                  )}
+                  {perms?.microphone === 'restricted' && (
+                    <p className="text-[12px] text-red-400/90">{t('permMicRestricted')}</p>
+                  )}
                   <button
                     onClick={async () => {
                       try {
