@@ -108,6 +108,24 @@ pub async fn get_captured_target_pos() -> Option<(i32, i32)> {
 /// to the wrong app. It auto-expires as a safety net if a paste never resumes it.
 static TRACKER_RESUME_AT: Lazy<Mutex<Option<std::time::Instant>>> = Lazy::new(|| Mutex::new(None));
 
+/// Restores the mouse pointer to where the user left it, when dropped. Deliberately held
+/// across the right-click that the console copy performs — restoring at the end of the
+/// positioning block would move the pointer back BEFORE the click fires.
+#[cfg(target_os = "windows")]
+struct CursorRestore(Option<windows::Win32::Foundation::POINT>);
+#[cfg(target_os = "windows")]
+impl Drop for CursorRestore {
+    fn drop(&mut self) {
+        if let Some(p) = self.0 {
+            unsafe { let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(p.x, p.y); }
+        }
+    }
+}
+#[cfg(target_os = "windows")]
+fn scopeguard_restore(had: bool, p: windows::Win32::Foundation::POINT) -> CursorRestore {
+    CursorRestore(if had { Some(p) } else { None })
+}
+
 fn pause_tracker(secs: u64) {
     if let Ok(mut g) = TRACKER_RESUME_AT.lock() {
         *g = Some(std::time::Instant::now() + Duration::from_secs(secs));
