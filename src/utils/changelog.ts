@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.42',
+    date: '2026-08-10',
+    changes: [
+      'Windows: picking File → Close/Quit from the settings window\'s menu bar quit the whole app instead of hiding it. That menu bar is gone — it was never ours, and a tray app has no use for it (thanks to @ardi-work for the report, #14)',
+      'macOS: quitting with Cmd+Q in the middle of a voice recording could leave your system muted. Every exit path now restores the sound',
+    ],
+  },
+  {
     version: '1.0.41',
     date: '2026-08-09',
     changes: [
