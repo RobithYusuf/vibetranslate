@@ -16,7 +16,6 @@
 // long list guesses wrong more often than it helps, and a wrong capital reads worse than a
 // missing one.
 const ALWAYS_CAPS = new Set([
-  'i',
   'indonesia',
   'inggris',
   'english',
@@ -41,13 +40,21 @@ export function humanizeTranscript(raw: string, force = false): string {
   // breath, a keyboard clack — regularly decode as CJK ("好an terakhir…"). When the sentence
   // is overwhelmingly Latin, those characters are artifacts, not words: drop them. A genuine
   // Chinese dictation is mostly CJK and sails through untouched.
+  // Only RUNS of one or two CJK characters are treated as artifacts, and they are removed
+  // (not blanked): the observed failures are a stray glyph fused to a word ("好an
+  // terakhir", "ter好ima kasih"), and deletion heals the word where a space would split it.
+  // Longer runs are genuine writing — "Windows 11 の設定" mixes scripts legitimately, and an
+  // earlier blanket strip deleted the Japanese half of exactly that kind of sentence.
   const latinCount = (text.match(/[A-Za-z]/g) || []).length;
-  const cjkCount = (text.match(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af\u0e00-\u0e7f]/g) || []).length;
   let cleaned = text;
-  if (cjkCount > 0 && latinCount > cjkCount * 2) {
+  if (latinCount >= 8) {
     cleaned = text
-      .replace(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af\u0e00-\u0e7f]+/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af\u0e00-\u0e7f]{1,2}(?![\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af\u0e00-\u0e7f])/g, (m, off: number) => {
+        const prev = off > 0 ? text[off - 1] : '';
+        if (/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af\u0e00-\u0e7f]/.test(prev)) return m; // tail of a longer run
+        return '';
+      })
+      .replace(/\s{2,}/g, ' ')
       .trim();
   }
 
@@ -68,9 +75,10 @@ export function humanizeTranscript(raw: string, force = false): string {
 
   out = out.replace(/\b[a-z]+\b/g, (w) => (ALWAYS_CAPS.has(w) ? w[0].toUpperCase() + w.slice(1) : w));
 
-  // The rule above lower-cases a leading "I"; put it back for the English pronoun only when it
-  // stands alone.
-  out = out.replace(/\bi\b/g, 'I');
+  // The English pronoun "i" only earns its capital when the next word proves the sentence
+  // is English — a blanket rule turned Indonesian letter enumeration ("pasal 5 huruf i
+  // ayat 2") into "huruf I".
+  out = out.replace(/\bi\b(?=\s+(?:am|was|were|will|would|can|could|should|have|had|think|thought|want|need|do|did|don't|didn't|just|really|also|only|never|always|guess|mean|know|feel|hope|believe|love|like|hate|got|get|went|go|see|said|say)\b)/g, 'I');
 
   return out;
 }

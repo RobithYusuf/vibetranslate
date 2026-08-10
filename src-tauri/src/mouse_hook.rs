@@ -402,7 +402,11 @@ mod imp {
                     TAP_ACTIVE.store(true, Ordering::SeqCst);
                     // A low-level hook only fires while the installing thread pumps messages.
                     let mut msg = MSG::default();
-                    while GetMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0).as_bool() {
+                    // GetMessageW returns -1 on error, and BOOL(-1).as_bool() is TRUE — an error
+        // therefore span a hot loop with no message to process. 0 (WM_QUIT) and -1 both end it.
+        loop {
+            let r = GetMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0);
+            if r.0 <= 0 { break; }
                         // no dispatch needed; the hook runs on this thread
                     }
                     TAP_ACTIVE.store(false, Ordering::SeqCst);

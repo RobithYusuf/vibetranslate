@@ -124,8 +124,10 @@ pub fn release_mute_if_held() {}
 /// and still answering global shortcuts. A user who picks Quit and later finds it alive
 /// reasonably concludes it ignored them. Matches what the tray's Quit does.
 #[tauri::command]
-pub fn quit_app() {
+pub fn quit_app(app: AppHandle) {
     release_mute_if_held();
+    // See the tray Quit handler: without this, Windows strands a ghost tray icon.
+    app.cleanup_before_exit();
     std::process::exit(0);
 }
 
@@ -563,9 +565,8 @@ fn position_transcript_window(app: &AppHandle) {
         return;
     };
     let Some(monitor) = active_monitor(&rec) else { return };
-    let r = monitor_rect(&monitor);
     let (rw, rh) = window_size_in_space(&rec);
-    let (tw, _) = window_size_in_space(&tr);
+    let (tw, th) = window_size_in_space(&tr);
 
     // Read the pill's actual position rather than recomputing it: the user can choose top,
     // centre or bottom, and guessing would put the transcript in the wrong place for two of
@@ -582,10 +583,28 @@ fn position_transcript_window(app: &AppHandle) {
                 (p.x as f64, p.y as f64)
             }
         }
-        Err(_) => (r.x + (r.w - rw) / 2.0, r.y + r.h / 12.0),
+        Err(_) => {
+            let mr = monitor_rect(&monitor);
+            (mr.x + (mr.w - rw) / 2.0, mr.y + mr.h / 12.0)
+        }
     };
+    // Clamp against the monitor CONTAINING the pill, not active_monitor's cursor-based
+    // pick: on Windows the cursor may have wandered to another display while the user
+    // speaks, and the transcript would detach from the pill onto that display.
+    let r = app
+        .available_monitors()
+        .ok()
+        .and_then(|ms| {
+            ms.into_iter().map(|m| monitor_rect(&m)).find(|mr| {
+                rx >= mr.x && rx < mr.x + mr.w && ry >= mr.y && ry < mr.y + mr.h
+            })
+        })
+        .unwrap_or_else(|| monitor_rect(&monitor));
     let x = (rx + (rw - tw) / 2.0).max(r.x);
-    let y = ry + rh + 8.0;
+    // Below the pill when there is room; above it when the pill sits at the bottom of the
+    // screen (the "bottom" popup position) — otherwise the transcript landed off-screen.
+    let below = ry + rh + 8.0;
+    let y = if below + th <= r.y + r.h { below } else { (ry - th - 8.0).max(r.y) };
     set_window_pos(&tr, x, y);
 }
 
@@ -600,7 +619,11 @@ pub async fn show_transcript(app: AppHandle) -> Result<(), String> {
         set_overlay_level(&w);
     }
     // Showing a window can hand it the keyboard, and this one has no reason to hold it: the
-    // listening pill is where Enter and Esc belong. Give focus straight back.
+    // listening pill is where Enter and Esc belong. Give focus straight back — macOS only.
+    // On Windows, tao's set_focus falls back to a synthetic Alt keystroke when
+    // SetForegroundWindow fails (and it fails here: we are not the foreground process),
+    // which would pop the target app's menu bar mid-dictation.
+    #[cfg(target_os = "macos")]
     if let Some(rec) = app.get_webview_window("recording") {
         let _ = rec.set_focus();
     }

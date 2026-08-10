@@ -17,9 +17,11 @@ import { startLive, pushLive, finishLive, cancelLive } from './sttStream';
  */
 export class LiveSession {
   private queue: Int16Array[] = [];
-  private draining = false;
+  private drainPromise: Promise<void> | null = null;
   private active = false;
   private failed = false;
+  private cancelled = false;
+  private onUnavailable?: (err: unknown) => void;
 
   /** True once the recogniser is up and consuming audio. */
   get isActive(): boolean {
@@ -30,8 +32,12 @@ export class LiveSession {
   begin(onUnavailable?: (err: unknown) => void): void {
     this.queue = [];
     this.failed = false;
+    this.onUnavailable = onUnavailable;
     void startLive()
       .then(() => {
+        // The load can outlive the dictation: a session cancelled while its model was
+        // still loading must stay dead, not wake up and start consuming.
+        if (this.cancelled) return;
         this.active = true;
         void this.drain();
       })
@@ -46,14 +52,26 @@ export class LiveSession {
 
   /** Called from the audio tap with each ~200ms PCM chunk. */
   feed(pcm: Int16Array): void {
-    if (this.failed) return;
+    if (this.failed || this.cancelled) return;
     this.queue.push(pcm);
-    if (this.queue.length > 150) this.queue.shift();
+    if (this.queue.length > 150) {
+      // The cap is only ever hit while the model is still loading. Splicing chunks out of
+      // the middle of a stateful stream garbles it — but the one-shot fallback still has
+      // the COMPLETE recording blob, so failing over loses nothing at all.
+      this.failed = true;
+      this.queue = [];
+      this.onUnavailable?.(new Error('model load outlasted the audio queue'));
+      return;
+    }
     void this.drain();
   }
 
   /** Flush the recogniser and return the final text. The session ends here. */
   async finish(): Promise<string> {
+    // Let the queue empty first: an in-flight push racing stream_stt_finish could land its
+    // 200ms of audio on the NEXT utterance's fresh stream, opening it with a stray syllable.
+    await (this.drainPromise ?? Promise.resolve());
+    await this.drain();
     this.active = false;
     return finishLive();
   }
@@ -61,24 +79,27 @@ export class LiveSession {
   /** Abandon without producing text. Safe to call while startup is still in flight — the
    *  recogniser side treats cancel of a not-yet-started session as a no-op. */
   cancel(): void {
+    this.cancelled = true;
     this.active = false;
     this.queue = [];
     void cancelLive();
   }
 
-  private async drain(): Promise<void> {
-    if (this.draining) return;
-    this.draining = true;
-    while (this.active && this.queue.length) {
-      const pcm = this.queue.shift();
-      if (pcm) {
-        try {
-          await pushLive(pcm);
-        } catch {
-          /* a dropped chunk costs a word, not the session */
+  private drain(): Promise<void> {
+    if (this.drainPromise) return this.drainPromise;
+    this.drainPromise = (async () => {
+      while (this.active && this.queue.length) {
+        const pcm = this.queue.shift();
+        if (pcm) {
+          try {
+            await pushLive(pcm);
+          } catch {
+            /* a dropped chunk costs a word, not the session */
+          }
         }
       }
-    }
-    this.draining = false;
+      this.drainPromise = null;
+    })();
+    return this.drainPromise;
   }
 }

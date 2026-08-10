@@ -245,7 +245,9 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     'streaming-multi': { size: '340 MB' },
   };
   const [sttReady, setSttReady] = useState<Record<string, boolean>>({});
-  const [sttDl, setSttDl] = useState<{ received: number; total: number } | null>(null);
+  // Keyed by model id: two download UIs render from this (the engine card and the live
+  // dictation row), and a single shared value made each show the OTHER's progress.
+  const [sttDl, setSttDl] = useState<Record<string, { received: number; total: number }>>({});
   useEffect(() => {
     for (const id of Object.keys(LOCAL_STT_MODELS)) {
       void invoke<boolean>('stt_model_status', { modelId: id })
@@ -254,12 +256,12 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     }
     const un = listen<{ model: string; received: number; total: number; done: boolean }>('stt-download-progress', (e) => {
       if (e.payload.done) {
-        setSttDl(null);
+        setSttDl((d) => { const n = { ...d }; delete n[e.payload.model]; return n; });
         void invoke<boolean>('stt_model_status', { modelId: e.payload.model })
           .then((ok) => setSttReady((r) => ({ ...r, [e.payload.model]: ok })))
           .catch(() => {});
       } else {
-        setSttDl({ received: e.payload.received, total: e.payload.total });
+        setSttDl((d) => ({ ...d, [e.payload.model]: { received: e.payload.received, total: e.payload.total } }));
       }
     });
     return () => { un.then((f) => f()); };
@@ -649,6 +651,12 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
   const handleMenuAction = async (action: string) => {
     setActiveMenu(null);
     switch (action) {
+      // 'Hide Window' carried action:'quit' since the menu was written — File → Hide
+      // Window exited the whole app, which is exactly what issue #14 reported. The
+      // 1.0.42 remove_menu() fix chased Tauri's default menu, but this bar is OURS.
+      case 'hide':
+        await invoke('hide_settings_window');
+        break;
       case 'quit':
         await invoke('quit_app');
         break;
@@ -686,7 +694,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     {
       label: 'File',
       items: [
-        { label: 'Hide Window', shortcut: `${menuKey}+H`, action: 'quit' },
+        { label: 'Hide Window', shortcut: `${menuKey}+H`, action: 'hide' },
         { type: 'separator' },
         { label: 'Quit', shortcut: `${menuKey}+Q`, action: 'quit' },
       ]
@@ -1109,8 +1117,6 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 </button>
               </div>
 
-              </div>
-
               {/* Voice Input (Voice Active) — enable + stop mode live here; shortcuts are in the Shortcuts tab */}
               <div className="bg-gradient-to-r from-[#252526] to-[#2a2a2c] rounded-lg p-4 border border-[#454545] space-y-3">
                 <div className="flex items-center justify-between">
@@ -1189,20 +1195,20 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                       />
                       {/* Offline model chosen but not installed -> inline download card */}
                       {voiceSttEngine in LOCAL_STT_MODELS && sttReady[voiceSttEngine] === false && (
-                        sttDl ? (
+                        sttDl[voiceSttEngine] ? (
                           <div className="mt-2">
                             <div className="flex justify-between text-[10px] text-white/50 mb-1">
                               <span>{t('sttDownloading')}</span>
-                              <span>{Math.round(sttDl.received / 1048576)} / {Math.max(1, Math.round(sttDl.total / 1048576))} MB</span>
+                              <span>{Math.round(sttDl[voiceSttEngine].received / 1048576)} / {Math.max(1, Math.round(sttDl[voiceSttEngine].total / 1048576))} MB</span>
                             </div>
                             <div className="h-1.5 bg-[#2a2a2a] rounded overflow-hidden">
-                              <div className="h-full bg-cyan-500 transition-all" style={{ width: `${Math.min(100, (sttDl.received / Math.max(1, sttDl.total)) * 100)}%` }} />
+                              <div className="h-full bg-cyan-500 transition-all" style={{ width: `${Math.min(100, (sttDl[voiceSttEngine].received / Math.max(1, sttDl[voiceSttEngine].total)) * 100)}%` }} />
                             </div>
                           </div>
                         ) : (
                           <button
                             type="button"
-                            onClick={() => { setSttDl({ received: 0, total: 1 }); void invoke('download_stt_model', { modelId: voiceSttEngine }).catch(() => setSttDl(null)); }}
+                            onClick={() => { const m = voiceSttEngine; setSttDl((d) => ({ ...d, [m]: { received: 0, total: 1 } })); void invoke('download_stt_model', { modelId: m }).catch((e) => { setSttDl((d) => { const n = { ...d }; delete n[m]; return n; }); toast.error(String(e)); }); }}
                             className="mt-2 w-full px-2 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-[12px] font-medium transition-colors"
                           >
                             <span className="inline-flex items-center justify-center gap-1.5"><Download size={13} /> {t('sttDownloadCta').replace('{size}', LOCAL_STT_MODELS[voiceSttEngine]?.size ?? '')}</span>
@@ -1354,15 +1360,19 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                         <span className="text-[12px] text-amber-300/90 truncate">
                           {t('voiceLiveLabel')}
                         </span>
-                        {sttReady['streaming-multi'] === false ? (
-                          sttDl ? (
+                        {sttReady['streaming-multi'] !== true ? (
+                          sttDl['streaming-multi'] ? (
                             <span className="text-[10px] text-white/40 tabular-nums shrink-0">
-                              {Math.round((sttDl.received / Math.max(1, sttDl.total)) * 100)}%
+                              {Math.round((sttDl['streaming-multi'].received / Math.max(1, sttDl['streaming-multi'].total)) * 100)}%
                             </span>
+                          ) : sttReady['streaming-multi'] === undefined ? (
+                            // Status check still in flight: showing the Toggle here let the
+                            // user arm live mode with no model on disk.
+                            <span className="text-[10px] text-white/25 shrink-0">…</span>
                           ) : (
                             <button
                               type="button"
-                              onClick={() => { setSttDl({ received: 0, total: 1 }); void invoke('download_stt_model', { modelId: 'streaming-multi' }).catch(() => setSttDl(null)); }}
+                              onClick={() => { setSttDl((d) => ({ ...d, 'streaming-multi': { received: 0, total: 1 } })); void invoke('download_stt_model', { modelId: 'streaming-multi' }).catch((e) => { setSttDl((d) => { const n = { ...d }; delete n['streaming-multi']; return n; }); toast.error(String(e)); }); }}
                               className="text-[10px] text-cyan-300/90 hover:text-cyan-200 underline underline-offset-2 cursor-pointer shrink-0"
                             >
                               {t('voiceLiveDownload')}
@@ -1535,6 +1545,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                   </button>
                 </div>
               )}
+              </div>
             </div>
           )}
 

@@ -851,7 +851,7 @@ fn get_terminal_selection_from_hwnd(hwnd: windows::Win32::Foundation::HWND) -> R
         
         dlog!("[get_terminal_selection] Read {} chars: '{}'", 
             trimmed.len(), 
-            if trimmed.len() > 50 { format!("{}...", &trimmed[..50]) } else { trimmed.clone() });
+            if trimmed.len() > 50 { format!("{}...", trimmed.chars().take(50).collect::<String>()) } else { trimmed.clone() });
         
         Ok(trimmed)
     }
@@ -1069,10 +1069,13 @@ pub async fn save_active_app() -> Result<String, String> {
 #[tauri::command]
 pub async fn capture_foreground_hwnd(live: bool) -> Result<String, String> {
     // Pin the target: from here until the paste, the background tracker won't overwrite it, so a
-    // Cmd-Tab (or an overlay) mid-operation can't redirect the paste to the wrong app. 60s covers
-    // even a slow free-server translation with cross-provider retries; if the paste never comes
-    // (op died), the pin self-expires so the tracker can't stay frozen.
-    pause_tracker(60);
+    // Cmd-Tab (or an overlay) mid-operation can't redirect the paste to the wrong app. The paste
+    // (or a cancel) lifts the pin; the expiry is only a safety net for an op that died. It must
+    // outlast the OPERATION: 60s covers a slow translation, but a voice dictation legally runs to
+    // 15 minutes, and on Windows the paste re-reads the live tracker slot — with a 60s pin the
+    // tracker resumed mid-dictation and a final transcript aimed at Slack landed in the browser
+    // the user had alt-tabbed to.
+    pause_tracker(if live { 60 } else { 16 * 60 });
 
     #[cfg(target_os = "macos")]
     {
@@ -1390,6 +1393,9 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
     
     #[cfg(target_os = "windows")]
     {
+        resume_tracker(); // pinned target consumed — macOS does this too; without it the
+                          // tracker stayed frozen for the rest of the pin after every CLI Translate
+
         use windows::Win32::Foundation::HWND;
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
         
@@ -1702,15 +1708,27 @@ pub async fn simulate_copy() -> Result<(), String> {
                     let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
                     let mut rect = RECT::default();
                     let got_rect = unsafe { GetWindowRect(hwnd, &mut rect) };
+                    // Declared OUTSIDE the if: the guard restores the pointer when it drops,
+                    // and that must happen AFTER the right-click below, not at the if's end.
+                    let mut _restore: Option<CursorRestore> = None;
                     
                     if got_rect.is_ok() {
                         let center_x = (rect.left + rect.right) / 2;
                         let center_y = (rect.top + rect.bottom) / 2;
                         dlog!("[simulate_copy] Moving mouse to window center: ({}, {})", center_x, center_y);
                         
-                        use enigo::Coordinate;
-                        enigo.move_mouse(center_x, center_y, Coordinate::Abs).map_err(|e| e.to_string())?;
+                        // NOT enigo Abs: it normalises against the PRIMARY display only, so a
+                        // terminal on a second monitor clamped to the primary's edge and the
+                        // right-click landed on whatever app sat there. SetCursorPos takes the
+                        // same virtual-desktop coordinates GetWindowRect returned; the guard
+                        // above puts the pointer back after the click.
+                        use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
+                        use windows::Win32::Foundation::POINT;
+                        let mut prev = POINT::default();
+                        let had_prev = unsafe { GetCursorPos(&mut prev) }.is_ok();
+                        unsafe { let _ = SetCursorPos(center_x, center_y); }
                         std::thread::sleep(std::time::Duration::from_millis(50));
+                        _restore = Some(scopeguard_restore(had_prev, prev));
                     }
                 }
                 
@@ -1925,14 +1943,20 @@ pub async fn simulate_terminal_copy() -> Result<(), String> {
                 use windows::Win32::Foundation::RECT;
                 
                 let mut rect = RECT::default();
+                let mut _restore: Option<CursorRestore> = None;
                 if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
                     let center_x = (rect.left + rect.right) / 2;
                     let center_y = (rect.top + rect.bottom) / 2;
                     dlog!("[terminal_copy] Mouse → ({}, {})", center_x, center_y);
                     
-                    use enigo::Coordinate;
-                    enigo.move_mouse(center_x, center_y, Coordinate::Abs).map_err(|e| e.to_string())?;
+                    // Same multi-monitor + restore reasoning as the simulate_copy site above.
+                    use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
+                    use windows::Win32::Foundation::POINT;
+                    let mut prev = POINT::default();
+                    let had_prev = unsafe { GetCursorPos(&mut prev) }.is_ok();
+                    unsafe { let _ = SetCursorPos(center_x, center_y); }
                     std::thread::sleep(std::time::Duration::from_millis(50));
+                    _restore = Some(scopeguard_restore(had_prev, prev));
                 } else {
                     dlog!("[terminal_copy] WARN: Could not get window rect");
                 }

@@ -37,15 +37,6 @@ fn main() {
             // forward/middle) trigger a shortcut system-wide. Inactive if Accessibility isn't
             // granted yet; the frontend can retry via restart_mouse_hook.
             mouse_hook::start(app.handle().clone());
-            // Drop the default app menu everywhere but macOS. Windows and Linux draw it
-            // as a bar INSIDE the settings window, and Tauri's default carries File →
-            // Close Window/Quit items that bypass our hide-on-close interception — a
-            // Windows user picked one and the whole app exited (issue #14). macOS keeps
-            // it: there the menu lives in the global bar and supplies the standard
-            // Cmd+C/V/Q behaviour users expect.
-            #[cfg(not(target_os = "macos"))]
-            let _ = app.handle().remove_menu();
-
             // Pre-create the hidden voice recording overlay so it shows instantly
             // (non-activating) without bringing the main window forward.
             commands::ensure_recording_window(&app.handle());

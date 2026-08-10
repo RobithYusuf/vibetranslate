@@ -239,14 +239,24 @@ export default function RecordingOverlay() {
         // path on ANY local failure — with a console warning, never silently worse
         // than before the feature existed.
         let rawTranscript: string;
-        if (liveRef.current?.isActive) {
+        // Detach the live session on EVERY branch, not just the active one. A session whose
+        // model was still loading when the user stopped used to stay referenced through the
+        // whole transcribe→translate→paste pipeline; when the load finally resolved it went
+        // active, drained 30s of queued audio, and popped the transcript window back open
+        // mid-paste replaying the finished sentence.
+        const liveSession = liveRef.current;
+        liveRef.current = null;
+        if (liveSession && !liveSession.isActive) {
+          // Startup may still be in flight; a late resolve must find a cancelled session,
+          // not one it can activate. The recording blob below still has the full audio.
+          liveSession.cancel();
+        }
+        if (liveSession?.isActive) {
           // The text has been accumulating the whole time the user was speaking; finishing
           // flushes the recogniser's look-ahead and returns the final version. The recogniser
           // shouts (its vocabulary is upper case) — fix that before ANYTHING else touches the
           // text, because corrections, cleanup, translation and the paste are all downstream.
-          const session = liveRef.current;
-          liveRef.current = null;
-          rawTranscript = humanizeTranscript(await session.finish(), true);
+          rawTranscript = humanizeTranscript(await liveSession.finish(), true);
         } else if (['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine)) {
           try {
             const t0 = performance.now();
@@ -332,6 +342,15 @@ export default function RecordingOverlay() {
         }
 
         if (cancelledRef.current) return; // cancelled during the pipeline -> paste nothing
+
+        // Nothing to paste is an outcome, not a success: without this, a silent dictation
+        // wrote '' to the clipboard (destroying whatever the user had there), pasted
+        // nothing, and played the success chime.
+        if (!out.trim()) {
+          announce('error', 'No speech detected');
+          finishSession('error');
+          return;
+        }
 
         announce('pasting');
         await setClipboardText(out);
@@ -430,7 +449,9 @@ export default function RecordingOverlay() {
         liveRef.current = session;
         session.begin((e) => {
           console.warn('[Voice] live mode unavailable, using one-shot transcription:', e);
-          liveRef.current = null;
+          // Only detach OUR session: a stale rejection from a previous press must not
+          // kill the live mode of the session that replaced it.
+          if (liveRef.current === session) liveRef.current = null;
         });
       }
 

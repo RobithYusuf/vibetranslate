@@ -102,12 +102,20 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> Result<(), Box<dyn std::er
     // relative path — the old from_path("icons/tray-icon.png") resolved against the process CWD,
     // which in a bundled app isn't the icons dir, so it silently fell back to the full-colour
     // app icon and rendered as a blank box under macOS template mode.
+    // macOS gets the black glyph as a TEMPLATE (the OS recolours it per menu-bar theme).
+    // Windows has no template concept: the same black glyph was invisible on the dark
+    // Windows 11 taskbar, so it ships a white variant there.
+    #[cfg(target_os = "macos")]
     let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+        .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
+    #[cfg(not(target_os = "macos"))]
+    let icon = Image::from_bytes(include_bytes!("../icons/tray-icon-light.png"))
         .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
 
     #[allow(unused_mut)] // mut needed for macOS icon_as_template
     let mut builder = TrayIconBuilder::with_id("main")
         .icon(icon)
+        .tooltip("VibeTranslate")
         .menu(&menu)
         // Left-click opens the app directly (the natural primary action); the menu appears on right-click.
         .show_menu_on_left_click(false)
@@ -128,6 +136,10 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> Result<(), Box<dyn std::er
             "quit" => {
                 // Same reason as commands::quit_app: never leave the machine muted.
                 crate::commands::release_mute_if_held();
+                // process::exit never unwinds, so the TrayIcon is never dropped — and on
+                // Windows dropping it is what issues Shell_NotifyIcon(NIM_DELETE). Without
+                // this, every quit stranded a ghost icon in the notification area.
+                app.cleanup_before_exit();
                 std::process::exit(0);
             }
             _ => {}

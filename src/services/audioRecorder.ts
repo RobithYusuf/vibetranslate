@@ -100,6 +100,52 @@ let safetyTimer: ReturnType<typeof setTimeout> | null = null;
 let boostContext: AudioContext | null = null;
 let pcmTap: ScriptProcessorNode | null = null;
 
+/**
+ * Attach the live-dictation PCM tap to a node in an audio graph. Resampled to 16kHz here
+ * rather than in Rust: the recogniser wants 16k, and doing it once at the source keeps every
+ * chunk a whole number of samples. Lives OUTSIDE the boost graph on purpose — it used to be
+ * nested inside `if (boost)`, so turning Mic boost off silently starved live dictation of
+ * every sample: the session went active, heard nothing, and finished empty.
+ */
+function attachPcmTap(
+  ctx: AudioContext,
+  from: AudioNode,
+  onPcmChunk: (pcm: Int16Array) => void,
+): ScriptProcessorNode {
+  const inRate = ctx.sampleRate;
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  let carry: number[] = [];
+  const RATIO = inRate / 16000;
+  node.onaudioprocess = (ev) => {
+    const input = ev.inputBuffer.getChannelData(0);
+    // Cheap decimation with a fractional cursor. Good enough for ASR features, and far
+    // cheaper than an OfflineAudioContext resample on every 85ms block.
+    for (let i = 0; i < input.length; i += RATIO) {
+      carry.push(input[Math.floor(i)]);
+    }
+    // ~200ms at 16kHz. Smaller chunks mean more IPC for no perceptible gain; larger
+    // ones make the live text visibly lag behind the voice.
+    while (carry.length >= 3200) {
+      const slice = carry.slice(0, 3200);
+      carry = carry.slice(3200);
+      const pcm = new Int16Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        const v = Math.max(-1, Math.min(1, slice[i]));
+        pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+      }
+      onPcmChunk(pcm);
+    }
+  };
+  from.connect(node);
+  // ScriptProcessor only runs while connected to a destination; a zero gain keeps it
+  // alive without adding the microphone to the speakers.
+  const sink = ctx.createGain();
+  sink.gain.value = 0;
+  node.connect(sink);
+  sink.connect(ctx.destination);
+  return node;
+}
+
 let audioContext: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
 let processor: ScriptProcessorNode | null = null;
@@ -569,47 +615,31 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
       limiter.connect(dest);
       recordStream = dest.stream;
 
-      // Live-dictation tap. Resampled to 16kHz here rather than in Rust: the recogniser wants
-      // 16k, and doing it once at the source keeps every chunk a whole number of samples.
+      // Live-dictation tap, fed from AFTER the limiter so the recogniser hears exactly
+      // what the recording hears.
       if (opts.onPcmChunk) {
-        const ctx = boostContext;
-        const inRate = ctx.sampleRate;
-        const node = ctx.createScriptProcessor(4096, 1, 1);
-        let carry: number[] = [];
-        const RATIO = inRate / 16000;
-        node.onaudioprocess = (ev) => {
-          const input = ev.inputBuffer.getChannelData(0);
-          // Cheap decimation with a fractional cursor. Good enough for ASR features, and far
-          // cheaper than an OfflineAudioContext resample on every 85ms block.
-          for (let i = 0; i < input.length; i += RATIO) {
-            carry.push(input[Math.floor(i)]);
-          }
-          // ~200ms at 16kHz. Smaller chunks mean more IPC for no perceptible gain; larger
-          // ones make the live text visibly lag behind the voice.
-          while (carry.length >= 3200) {
-            const slice = carry.slice(0, 3200);
-            carry = carry.slice(3200);
-            const pcm = new Int16Array(slice.length);
-            for (let i = 0; i < slice.length; i++) {
-              const v = Math.max(-1, Math.min(1, slice[i]));
-              pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
-            }
-            opts.onPcmChunk?.(pcm);
-          }
-        };
-        limiter.connect(node);
-        // ScriptProcessor only runs while connected to a destination; a zero gain keeps it
-        // alive without adding the microphone to the speakers.
-        const sink = ctx.createGain();
-        sink.gain.value = 0;
-        node.connect(sink);
-        sink.connect(ctx.destination);
-        pcmTap = node;
+        pcmTap = attachPcmTap(boostContext, limiter, opts.onPcmChunk);
       }
     } catch (e) {
       console.warn('[Voice] mic boost graph failed, recording raw:', e);
       if (boostContext) { boostContext.close().catch(() => {}); boostContext = null; }
       recordStream = stream;
+      pcmTap = null;
+    }
+  }
+  // Live dictation must hear the microphone whether or not the boost graph exists (boost
+  // off, or its construction failed). A minimal context taps the raw stream directly; the
+  // recording itself still uses the untouched stream.
+  if (opts.onPcmChunk && !pcmTap) {
+    try {
+      const Ctx: typeof AudioContext =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      boostContext = boostContext ?? new Ctx();
+      boostContext.resume().catch(() => {});
+      const rawSrc = boostContext.createMediaStreamSource(stream);
+      pcmTap = attachPcmTap(boostContext, rawSrc, opts.onPcmChunk);
+    } catch (e) {
+      console.warn('[Voice] live tap unavailable, live text will be empty:', e);
     }
   }
 

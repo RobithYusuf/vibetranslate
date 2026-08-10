@@ -102,13 +102,28 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
         ..Default::default()
     };
 
-    let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(s) = guard.as_mut() {
-        s.renew(); // already warm: nothing to load, the shortcut is ready at once
-        return Ok(());
+    {
+        let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(s) = guard.as_mut() {
+            s.renew(); // already warm: nothing to load, the shortcut is ready at once
+            return Ok(());
+        }
     }
 
-    let recognizer = OnlineRecognizer::create(&cfg).ok_or("gagal memuat model live")?;
+    // Load OUTSIDE the lock. Holding it across the multi-second 340MB load parked every
+    // other command on the mutex — pressing Esc during a cold start left stream_stt_cancel
+    // blocked for the whole load, so the cancel visibly did nothing.
+    let recognizer = tauri::async_runtime::spawn_blocking(move || OnlineRecognizer::create(&cfg))
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("gagal memuat model live")?;
+
+    let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = guard.as_mut() {
+        // Two starts raced; the earlier winner is already warm. Renew it and drop ours.
+        s.renew();
+        return Ok(());
+    }
     let stream = recognizer.create_stream();
     *guard = Some(Session {
         recognizer,
@@ -165,6 +180,9 @@ pub async fn stream_stt_push(
 pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> {
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     let Some(s) = guard.as_mut() else {
+        // Session already gone (live toggled off mid-dictation): still send the final
+        // marker, or the transcript window keeps the abandoned sentence in state.
+        let _ = app.emit("live-transcript", PartialTranscript { text: String::new(), is_final: true });
         return Ok(String::new());
     };
 
@@ -195,10 +213,13 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
 
 /// Throw the session away without producing text (user cancelled).
 #[tauri::command]
-pub async fn stream_stt_cancel() -> Result<(), String> {
+pub async fn stream_stt_cancel(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(s) = SESSION.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         s.renew();
     }
+    // The overlay clears its text only on an is_final event; without one a cancelled
+    // session's sentence lingered and flashed up when the window was next shown.
+    let _ = app.emit("live-transcript", PartialTranscript { text: String::new(), is_final: true });
     Ok(())
 }
 
