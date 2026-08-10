@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.43',
+    date: '2026-08-10',
+    changes: [
+      'Windows: File → Hide Window in the settings menu actually hides now — it was wired to Quit, which is what #14 reported. The tray icon is also visible on the dark taskbar at last, no longer lingers as a ghost after quitting, and shows a tooltip',
+      'Live dictation: a dictation stopped while the model was still loading no longer replays itself minutes later; a silent dictation reports "No speech detected" instead of erasing your clipboard; and live text now works with Mic boost turned off',
+      'Long dictations on Windows paste into the app you started them in, even if you switched windows while speaking',
+      'Mixed-language dictation keeps its Japanese/Chinese/Thai parts; stray foreign characters glued to a word ("ter好ima") are healed instead of split; "pasal 5 huruf i" keeps its lowercase i',
+      'Settings: downloading one voice model no longer shows its progress on the other model\'s card, download failures show an error instead of silently vanishing, and switching the app off now dims everything it controls',
+    ],
+  },
+  {
     version: '1.0.42',
     date: '2026-08-10',
     changes: [
