@@ -84,10 +84,12 @@ export const AI_PROVIDERS: Record<AIProvider, {
   openrouter: {
     name: 'OpenRouter (Free)',
     baseURL: 'https://openrouter.ai/api/v1',
-    defaultModel: 'meta-llama/llama-3.3-70b-instruct:free',
+    // Same sweep: OpenRouter's :free variant of Llama 3.3 70B is gone from its live list too
+    // (the paid variant remains). Replaced with models confirmed present today.
+    defaultModel: 'openai/gpt-oss-120b:free',
     models: [
-      { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (free)', free: true },
-      { id: 'deepseek/deepseek-chat-v3-0324:free', name: 'DeepSeek V3 (free)', free: true },
+      { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B (free)', free: true },
+      { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B (free)', free: true },
       { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B (free)', free: true },
       { id: 'openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (free)', free: true },
       { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B (free)', free: true },
@@ -98,12 +100,15 @@ export const AI_PROVIDERS: Record<AIProvider, {
   groq: {
     name: 'Groq (Free & Fast)',
     baseURL: 'https://api.groq.com/openai/v1',
-    defaultModel: 'llama-3.3-70b-versatile',
+    // Groq's PRODUCTION text models, checked against its live model list. Both Llama entries
+    // that used to be here were removed by Groq outright — gone from GET /models, not merely
+    // deprecated — and anyone whose saved model was one of them got a failure on every
+    // translation. Qwen3.6-27B works but Groq classes it "preview, for evaluation only", so
+    // it is deliberately not offered: preview is the category that just broke.
+    defaultModel: 'openai/gpt-oss-120b',
     models: [
-      { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (best)', free: true },
-      { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B (fastest)', free: true },
-      { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B', free: true },
-      { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B', free: true },
+      { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B (best)', free: true },
+      { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B (fastest)', free: true },
     ],
     keyPrefix: 'gsk_',
     keyPlaceholder: 'gsk_...',

@@ -36,7 +36,7 @@ export function Select({ value, onChange, options, className = '', maxHeight = 2
   }, [options, query, showSearch]);
   
   // Width from longest option, but CAPPED so a very long model id (e.g.
-  // "meta-llama/llama-3.3-70b-instruct:free") can't blow out the layout.
+  // "nvidia/nemotron-3-super-120b-a12b:free") can't blow out the layout.
   // The trigger + dropdown items truncate, so the container never needs to be wide.
   const longestLabel = options.reduce((max, opt) => opt.label.length > max.length ? opt.label : max, '');
   const calculatedMinWidth = minWidth || Math.min(Math.max(longestLabel.length * 8 + 40, 100), 240);

@@ -148,7 +148,21 @@ export function useSettings() {
           }
           // Restore the saved model LAST, after the provider/key dance above, so it isn't
           // overwritten by a setProvider() default.
-          if ((settings as { model?: string }).model) setModel((settings as { model?: string }).model!);
+          // Migrate models their provider has DELETED. Groq removed both Llama entries and
+          // OpenRouter dropped the :free variant of one; a saved id pointing at any of them
+          // fails on every request, and a BYOK user talks to the provider directly, so
+          // nothing downstream can rescue them. The server tier is safe either way — its
+          // allowlist falls back — but silently leaving a dead id in settings means the
+          // update fixes nothing for the people it was released for.
+          const savedModel = (settings as { model?: string }).model;
+          if (savedModel) {
+            const RETIRED: Record<string, string> = {
+              'llama-3.3-70b-versatile': 'openai/gpt-oss-120b',
+              'llama-3.1-8b-instant': 'openai/gpt-oss-20b',
+              'meta-llama/llama-3.3-70b-instruct:free': 'openai/gpt-oss-120b:free',
+            };
+            setModel(RETIRED[savedModel] ?? savedModel);
+          }
           // Validate shortcuts before applying - reset to default if invalid
           const savedShortcut = settings.shortcut;
           const savedPopupShortcut = (settings as { popupShortcut?: string }).popupShortcut;

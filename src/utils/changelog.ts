@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.47',
+    date: '2026-08-11',
+    changes: [
+      'Fixes translation failing with "server unreachable". Groq removed the Llama models VibeTranslate used, so every free translation was failing — the built-in service now runs on GPT-OSS 120B and was fixed for everyone the moment it was found, with no update needed',
+      'If you use your own Groq or OpenRouter key and had one of the removed models selected, this update switches you to a working one automatically',
+    ],
+  },
+  {
     version: '1.0.46',
     date: '2026-08-11',
     changes: [
