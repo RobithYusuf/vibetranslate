@@ -23,7 +23,7 @@ once_cell = "1.19"
 tauri-plugin-http = "2.5.9"
 sherpa-onnx = "1.13.4"
 # Integrity check for downloaded speech models (see stt.rs ModelFile::sha256).
-sha2 = "0.10"
+sha2 = "0.11"
 # API keys in the OS credential store (Keychain / Credential Manager) rather than a
 # world-readable settings file. See src/secrets.rs.
 keyring = "4"
@@ -32,7 +32,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
