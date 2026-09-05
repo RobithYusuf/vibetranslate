@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.49',
+    date: '2026-09-05',
+    changes: [
+      'Linux desktop support with AppImage and Debian/Ubuntu packages',
+      'Global keyboard shortcuts and Ctrl+C/Ctrl+V workflows now work on Linux desktops',
+      'Landing page and download instructions now cover macOS, Windows, and Linux',
+    ],
+  },
+  {
     version: '1.0.48',
     date: '2026-09-05',
     changes: [

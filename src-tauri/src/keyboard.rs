@@ -19,6 +19,44 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+#[cfg(target_os = "linux")]
+fn linux_send_key_combo(key: char, shift: bool) -> Result<(), String> {
+    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("Failed to init Linux keyboard: {e}"))?;
+
+    // Global shortcuts may still be held when this function runs. Release the
+    // modifiers first so a synthetic Ctrl+C/V cannot inherit the trigger chord.
+    let _ = enigo.key(Key::Control, Direction::Release);
+    let _ = enigo.key(Key::Alt, Direction::Release);
+    let _ = enigo.key(Key::Shift, Direction::Release);
+    std::thread::sleep(Duration::from_millis(80));
+
+    enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
+    if shift {
+        enigo.key(Key::Shift, Direction::Press).map_err(|e| e.to_string())?;
+    }
+    enigo.key(Key::Unicode(key), Direction::Click).map_err(|e| e.to_string())?;
+    if shift {
+        enigo.key(Key::Shift, Direction::Release).map_err(|e| e.to_string())?;
+    }
+    enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_clear_line(chars: usize) -> Result<(), String> {
+    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("Failed to init Linux keyboard: {e}"))?;
+    enigo.key(Key::End, Direction::Click).map_err(|e| e.to_string())?;
+    for _ in 0..chars.min(500) {
+        enigo.key(Key::Backspace, Direction::Click).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 use once_cell::sync::Lazy;
 
 /// Escape a string for safe interpolation inside an AppleScript double-quoted literal.
@@ -1080,6 +1118,14 @@ pub async fn save_active_app() -> Result<String, String> {
             Err("No app tracked yet - please click on another app first".to_string())
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        let app = "Linux".to_string();
+        if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
+            *guard = Some(app.clone());
+        }
+        Ok(app)
+    }
 }
 
 // Capture foreground HWND immediately - call this at the START of translate
@@ -1166,6 +1212,16 @@ pub async fn capture_foreground_hwnd(live: bool) -> Result<String, String> {
             dlog!("[capture_foreground_hwnd] RESULT: Current is our app, returning SAVED '{}'", saved_app.clone().unwrap_or_default());
             saved_app.ok_or_else(|| "No previous app saved".to_string())
         }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = live;
+        pause_tracker(16 * 60);
+        let app = "Linux".to_string();
+        if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
+            *guard = Some(app.clone());
+        }
+        Ok(app)
     }
 }
 
@@ -1266,6 +1322,16 @@ pub async fn capture_and_copy() -> Result<String, String> {
         
         Ok(title)
     }
+    #[cfg(target_os = "linux")]
+    {
+        let title = "Linux".to_string();
+        if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
+            *guard = Some(title.clone());
+        }
+        linux_send_key_combo('c', false)?;
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        Ok(title)
+    }
 }
 
 // Get target app - ALWAYS get current frontmost, don't use cached
@@ -1326,6 +1392,12 @@ pub async fn get_target_app() -> Result<String, String> {
         
         dlog!("[get_target_app] Fallback rejected (is our app)");
         Err("Could not detect foreground app".to_string())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut guard = LAST_ACTIVE_APP.lock().map_err(|e| e.to_string())?;
+        let app = guard.get_or_insert_with(|| "Linux".to_string()).clone();
+        Ok(app)
     }
 }
 
@@ -1517,6 +1589,13 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
         
         dlog!("[terminal_replace] === DONE ===");
         Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(chars) = clear_chars {
+            linux_clear_line(chars)?;
+        }
+        linux_send_key_combo('v', false)
     }
 }
 
@@ -1771,6 +1850,10 @@ pub async fn simulate_copy() -> Result<(), String> {
         dlog!("[simulate_copy] Done");
         Ok(())
     }
+    #[cfg(target_os = "linux")]
+    {
+        linux_send_key_combo('c', false)
+    }
 }
 
 // Direct copy - sends Ctrl+C to currently focused window WITHOUT restoring foreground
@@ -1834,6 +1917,10 @@ pub async fn simulate_copy_direct() -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(150));
         dlog!("[simulate_copy_direct] Done");
         Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux_send_key_combo('c', false)
     }
 }
 
@@ -1989,6 +2076,10 @@ pub async fn simulate_terminal_copy() -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(100));
         dlog!("[terminal_copy] === DONE ===");
         Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux_send_key_combo('c', false)
     }
 }
 
@@ -2192,6 +2283,11 @@ pub async fn simulate_paste() -> Result<(), String> {
         dlog!("[simulate_paste] Done");
         Ok(())
     }
+    #[cfg(target_os = "linux")]
+    {
+        resume_tracker();
+        linux_send_key_combo('v', false)
+    }
 }
 
 // Get terminal selection using Console APIs (AttachConsole + GetConsoleSelectionInfo)
@@ -2236,6 +2332,10 @@ pub async fn get_terminal_selection() -> Result<String, String> {
                 Err("Could not get terminal selection via Console API".to_string())
             }
         }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Err("Terminal selection API is not available on Linux; the clipboard fallback is used".to_string())
     }
 }
 

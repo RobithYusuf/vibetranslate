@@ -59,3 +59,8 @@ src-tauri/gen/schemas/
 *.dmg
 *.msi
 *.zip
+
+# Private service/site source lives only in auto-translate-desktop, never this public tree.
+/landing/
+/server/
+/worker/
