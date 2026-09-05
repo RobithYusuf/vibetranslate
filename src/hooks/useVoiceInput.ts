@@ -72,6 +72,8 @@ export function useVoiceInput() {
   const setIsRecording = useAppStore((s) => s.setIsRecording);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reEmitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startingRef = useRef(false);
+  const stopAfterStartRef = useRef(false);
   const sessionCounterRef = useRef(0);
 
   const clearReEmit = () => {
@@ -169,6 +171,30 @@ export function useVoiceInput() {
   const voiceTranslate = useCallback(() => toggleVoice('translate'), [toggleVoice]);
   const voiceOriginal = useCallback(() => toggleVoice('original'), [toggleVoice]);
 
+  // Push-to-talk uses the same start/stop events as tap mode. The small in-flight
+  // guard handles a very quick press-and-release before show_recording resolves.
+  const startVoice = useCallback(async (mode: VoiceMode) => {
+    if (useAppStore.getState().isRecording || startingRef.current) return;
+    startingRef.current = true;
+    try {
+      await toggleVoice(mode);
+    } finally {
+      startingRef.current = false;
+      if (stopAfterStartRef.current) {
+        stopAfterStartRef.current = false;
+        if (useAppStore.getState().isRecording) void emitTo('recording', 'voice-stop');
+      }
+    }
+  }, [toggleVoice]);
+
+  const stopVoice = useCallback(() => {
+    if (startingRef.current) {
+      stopAfterStartRef.current = true;
+      return;
+    }
+    if (useAppStore.getState().isRecording) void emitTo('recording', 'voice-stop');
+  }, []);
+
   // Esc / external cancel: tell the overlay to abort + hide. Clear the flag locally
   // too (the overlay also emits 'voice-finished', this is just immediate feedback).
   const cancelVoice = useCallback(() => {
@@ -176,5 +202,5 @@ export function useVoiceInput() {
     endSession();
   }, [endSession]);
 
-  return { toggleVoice, voiceTranslate, voiceOriginal, cancelVoice };
+  return { toggleVoice, voiceTranslate, voiceOriginal, startVoice, stopVoice, cancelVoice };
 }

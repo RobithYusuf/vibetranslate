@@ -455,7 +455,7 @@ fn set_overlay_level(window: &tauri::WebviewWindow) {
     use objc::{msg_send, sel, sel_impl};
     let _ = window.with_webview(|webview| unsafe {
         let ns_window = webview.ns_window() as id;
-        let _: () = msg_send![ns_window, setLevel: 3i64]; // NSFloatingWindowLevel
+        let _: () = msg_send![ns_window, setLevel: 25i64]; // NSStatusWindowLevel: stays above other apps/fullscreen spaces
         let behavior: u64 = (1 << 0) | (1 << 4) | (1 << 8); // allSpaces|stationary|fsAux
         let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
     });
@@ -518,6 +518,9 @@ pub fn ensure_recording_window(app: &AppHandle) {
         .decorations(false)
         .always_on_top(true)
         .focused(false)
+        // Pass the first click through to Done/Cancel when the overlay is inactive.
+        // macOS otherwise uses that click only to activate the floating window.
+        .accept_first_mouse(true)
         .skip_taskbar(true)
         .visible(false);
 

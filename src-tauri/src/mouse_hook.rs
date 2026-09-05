@@ -145,13 +145,24 @@ fn handle_mouse(dom: i64, kb_mods: u32, is_down: bool) -> bool {
             SWALLOWED.fetch_and(!dbit, Ordering::Relaxed);
             swallow = true;
         }
-        if d != 0 && CURRENT_HOLD.load(Ordering::Relaxed) == d {
+        // Tell the frontend about the release of a bound trigger. The held modifier must remain
+        // encoded until after this event so a Hold3+Mouse0 chord releases with the same key.
+        let held = CURRENT_HOLD.load(Ordering::Relaxed);
+        if swallow && (held == 0 || held != d) {
+            let key = d | (kb_mods << 8) | (held << 16);
+            if is_bound(key) {
+                if let Some(app) = APP.get() {
+                    let _ = app.emit("global-mouse-button-release", key);
+                }
+            }
+        }
+        if d != 0 && held == d {
             CURRENT_HOLD.store(0, Ordering::Relaxed);
         }
         swallow
     }
-}
 
+}
 // ===================== macOS: CGEventTap =====================
 
 #[cfg(target_os = "macos")]

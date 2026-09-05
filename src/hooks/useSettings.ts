@@ -45,6 +45,7 @@ export function useSettings() {
     voiceShortcut,
     voiceOriginalShortcut,
     voiceAutoStop,
+    voiceHoldToTalk,
     voicePopupPosition,
     voiceMaxMinutes,
     voiceSilenceSec,
@@ -81,6 +82,7 @@ export function useSettings() {
     setEnhanceShortcut,
     setVoiceEnabled,
     setVoiceAutoStop,
+    setVoiceHoldToTalk,
     setVoicePopupPosition,
     setVoiceSoundEnabled,
     setMicAutoGain,
@@ -200,6 +202,9 @@ export function useSettings() {
           if ((settings as { voiceAutoStop?: boolean }).voiceAutoStop !== undefined) {
             setVoiceAutoStop((settings as { voiceAutoStop?: boolean }).voiceAutoStop!);
           }
+          if ((settings as { voiceHoldToTalk?: boolean }).voiceHoldToTalk !== undefined) {
+            setVoiceHoldToTalk((settings as { voiceHoldToTalk?: boolean }).voiceHoldToTalk!);
+          }
           if ((settings as { voicePopupPosition?: string }).voicePopupPosition) {
             setVoicePopupPosition((settings as { voicePopupPosition?: string }).voicePopupPosition!);
           }
@@ -286,7 +291,7 @@ export function useSettings() {
       }
     };
     load();
-  }, [setApiKey, setProvider, setModel, setShortcut, setPopupShortcut, setTerminalShortcut, setSourceLang, setTargetLang, setAutoStart, setEnhanceEnabled, setEnhanceShortcut, setVoiceEnabled, setVoiceAutoStop, setVoicePopupPosition, setVoiceSoundEnabled, setMicAutoGain, setUiFont, setUiScale, setVoiceShortcut, setVoiceOriginalShortcut, setSoundEnabled, setLoadingEnabled, setAutoUpdateCheck, setSkippedUpdateVersion, setAppEnabled, setUiLanguage, setLicenseKey, setLicenseStatus, setCustomBaseURL, setCustomModel, setSettingsLoaded]);
+  }, [setApiKey, setProvider, setModel, setShortcut, setPopupShortcut, setTerminalShortcut, setSourceLang, setTargetLang, setAutoStart, setEnhanceEnabled, setEnhanceShortcut, setVoiceEnabled, setVoiceAutoStop, setVoiceHoldToTalk, setVoicePopupPosition, setVoiceSoundEnabled, setMicAutoGain, setVoiceMaxMinutes, setVoiceSilenceSec, setVoiceCorrections, setUiFont, setUiScale, setVoiceShortcut, setVoiceOriginalShortcut, setSoundEnabled, setLoadingEnabled, setAutoUpdateCheck, setSkippedUpdateVersion, setAppEnabled, setUiLanguage, setLicenseKey, setLicenseStatus, setCustomBaseURL, setCustomModel, setSettingsLoaded]);
 
   const save = useCallback(async () => {
     // Written to the OS credential store, deliberately NOT into the settings file below.
@@ -313,6 +318,7 @@ export function useSettings() {
       voiceShortcut,
       voiceOriginalShortcut,
       voiceAutoStop,
+      voiceHoldToTalk,
       voicePopupPosition,
       voiceSoundEnabled,
       micAutoGain,
@@ -332,7 +338,7 @@ export function useSettings() {
     console.log('[Settings] Saving settings:', { ...settings, apiKeys: '***', licenseKey: licenseKey ? '***' : null });
     await saveSettings(settings as unknown as Settings);
     console.log('[Settings] Saved successfully');
-  }, [licenseKey, licenseStatus, appEnabled, uiLanguage, apiKeys, provider, model, customBaseURL, customModel, shortcut, popupShortcut, terminalShortcut, sourceLang, targetLang, autoStart, enhanceEnabled, enhanceShortcut, voiceEnabled, voiceShortcut, voiceOriginalShortcut, voiceAutoStop, voicePopupPosition, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, uiFont, uiScale, soundEnabled, loadingEnabled, autoUpdateCheck, skippedUpdateVersion]);
+  }, [licenseKey, licenseStatus, appEnabled, uiLanguage, apiKeys, provider, model, customBaseURL, customModel, shortcut, popupShortcut, terminalShortcut, sourceLang, targetLang, autoStart, enhanceEnabled, enhanceShortcut, voiceEnabled, voiceShortcut, voiceOriginalShortcut, voiceAutoStop, voiceHoldToTalk, voicePopupPosition, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, uiFont, uiScale, soundEnabled, loadingEnabled, autoUpdateCheck, skippedUpdateVersion]);
 
   return { save };
 }

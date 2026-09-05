@@ -17,8 +17,6 @@ import { blobToPcm16kBase64 } from '@/utils/pcm';
 import type { VoiceStartPayload } from '@/hooks/useVoiceInput';
 import { applyVoiceCorrections } from '@/utils/voiceCorrections';
 import { notify } from '@/services/notify';
-// Higher-resolution mark: the watermark is rendered far larger than the 32px logo used
-// elsewhere, which would visibly soften when scaled and rotated.
 import logoMark from '@/assets/logo-mark.png';
 
 const EMPTY_BARS = new Array(VOICE_BAR_COUNT).fill(0);
@@ -33,7 +31,7 @@ function setSystemMute(mute: boolean): Promise<void> {
   return invoke('set_audio_muted', { mute }).then(() => {}).catch(() => {});
 }
 
-// The overlay is a small one-line box (~286px): long error sentences truncate into "No spee…".
+// The overlay is a small one-line box: long error sentences use a short glanceable label.
 // Map every failure to a SHORT, glanceable label; the full actionable detail goes out as a
 // system notification instead (see reportVoiceError).
 function shortVoiceError(msg: string): string {
@@ -420,10 +418,7 @@ export default function RecordingOverlay() {
         const cfg = payload.config;
         const eng = cfg.voiceSttEngine;
         setEngineTag(
-          // Live mode names its model outright: it behaves differently enough (streaming,
-          // upper-case vocabulary, on-device) that "which engine heard me?" is the first
-          // debugging question, and the tag answers it before it gets asked.
-          cfg.voiceLiveMode ? 'live · zipformer'
+          cfg.voiceLiveMode ? 'live'
           : ['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(eng) ? 'offline'
           : eng === 'groq' ? ((cfg.apiKeys.groq || '').trim() ? 'Groq' : 'server')
           : eng === 'openai' ? ((cfg.apiKeys.openai || '').trim() ? 'OpenAI' : 'server')
@@ -615,47 +610,47 @@ export default function RecordingOverlay() {
 
   const processing = status === 'transcribing' || status === 'translating' || status === 'pasting';
   const busy = recording || processing; // cancel (Esc) is available the whole time
-
   return (
-    <div className="relative h-screen w-screen flex items-center justify-between bg-[#1c1c1e] overflow-hidden pl-2.5 pr-2 gap-2 select-none">
-      {/* Tilted logo watermark — a "tattoo" across the pill. Deliberately above everything
-          (so it reads as one overlay, not a background) but at ~7% opacity, and clipped by
-          the pill edges. absolute + pointer-events-none: it must never take layout space or
-          swallow a click meant for the ✓/✗ buttons underneath. */}
-      <img
-        src={logoMark}
-        alt=""
-        aria-hidden="true"
-        draggable={false}
-        className="vt-watermark pointer-events-none absolute right-1 top-1/2 z-20 h-[58px] w-[58px] select-none"
-      />
-      <div className="flex items-center gap-2 min-w-0">
+    <div className="relative flex h-screen w-screen items-center justify-between gap-1.5 overflow-hidden bg-[#1c1c1e] px-2.5 select-none">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <img
+            src={logoMark}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="relative h-5 w-5 select-none object-contain opacity-90"
+          />
         {recording ? (
-          <div className="flex items-end gap-[3px] h-4 shrink-0">
+          <div className="ml-1.5 flex h-4 shrink-0 items-end gap-[3px]">
             {bars.map((b, i) => (
               <span
                 key={i}
                 className="w-[3px] rounded-full bg-red-500"
-                style={{ height: `${Math.max(15, Math.min(100, b * 100))}%`, transition: 'height 70ms ease-out' }}
+                style={{ height: String(Math.max(15, Math.min(100, b * 100))) + '%', transition: 'height 70ms ease-out' }}
               />
             ))}
           </div>
         ) : (
           <span className="shrink-0">{icon}</span>
         )}
-        <span className={`text-[11px] font-medium leading-normal truncate py-0.5 ${status === 'error' ? 'text-red-300' : 'text-white/85'}`}>
+        <span className={'mx-1 min-w-[52px] flex-1 overflow-hidden whitespace-nowrap py-0.5 text-[11px] font-medium leading-normal ' + (status === 'error' ? 'text-red-300' : 'text-white/85')}>
           {message}
         </span>
-        {recording && elapsed > 0 && (
-          <span className="text-[10px] text-white/40 tabular-nums shrink-0">{elapsedLabel}</span>
-        )}
-        {recording && engineTag && (
-          <span className="text-[10px] text-white/30 shrink-0" title={`Mesin transkripsi: ${engineTag}`}>· {engineTag}</span>
+        {recording && (
+          <span className="flex w-[70px] shrink-0 items-center gap-1.5 text-[10px] text-white/40">
+            <span className="w-7 shrink-0 text-right tabular-nums">{elapsedLabel}</span>
+            {engineTag && (
+              <>
+                <span className="h-3 w-px shrink-0 bg-white/15" aria-hidden="true" />
+                <span className="min-w-0 truncate text-[9px] text-white/30" title="Transcription engine">{engineTag}</span>
+              </>
+            )}
+          </span>
         )}
       </div>
 
       {busy ? (
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-white/10 bg-black/20 p-0.5 shadow-inner">
           {/* ✓ = finish -> transcribe & paste (click, Enter, or re-press shortcut) */}
           {recording && (
             <button
@@ -663,9 +658,9 @@ export default function RecordingOverlay() {
               onClick={() => processHandlerRef.current()}
               title="Done — Enter, or press the voice shortcut again (works from any app)"
               aria-label="Done"
-              className="flex items-center justify-center w-6 h-6 rounded-md bg-green-500/20 hover:bg-green-500/35 active:scale-90 active:bg-green-500/50 text-green-300 leading-none cursor-pointer transition-all duration-100"
+              className="vt-action-button vt-action-button-done flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-emerald-200 transition-all duration-150 active:scale-90"
             >
-              <Check size={14} />
+              <Check size={14} strokeWidth={2.5} />
             </button>
           )}
           {/* ✗ = cancel (pastes nothing) — click or Esc */}
@@ -674,14 +669,12 @@ export default function RecordingOverlay() {
             onClick={() => cancelHandlerRef.current()}
             title="Cancel (Esc)"
             aria-label="Cancel (Esc)"
-            className="flex items-center justify-center w-6 h-6 rounded-md bg-red-500/20 hover:bg-red-500/35 active:scale-90 active:bg-red-500/50 text-red-300 leading-none cursor-pointer transition-all duration-100"
+            className="vt-action-button vt-action-button-cancel flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-rose-200 transition-all duration-150 active:scale-90"
           >
-            <X size={14} />
+            <X size={14} strokeWidth={2.5} />
           </button>
         </div>
       ) : (
-        // The watermark now carries the branding, so the idle state no longer needs a logo
-        // occupying a flex slot. Keeps the pill the same width in every state.
         <span className="w-4 shrink-0" />
       )}
     </div>

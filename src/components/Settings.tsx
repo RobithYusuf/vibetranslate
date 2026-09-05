@@ -57,6 +57,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     voiceEnabled,
     voiceShortcut,
     voiceOriginalShortcut,
+    voiceHoldToTalk,
     voiceAutoStop,
     voiceMaxMinutes,
     voiceSilenceSec,
@@ -91,6 +92,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     setTerminalShortcut,
     setVoiceEnabled,
     setVoiceAutoStop,
+    setVoiceHoldToTalk,
     setVoicePopupPosition,
     setVoiceSoundEnabled,
     setMicAutoGain,
@@ -424,7 +426,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(() => autoSave(), 500);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [settingsLoaded, apiKey, provider, model, customBaseURL, customModel, shortcut, popupShortcut, terminalShortcut, sourceLang, targetLang, autoStart, enhanceEnabled, enhanceShortcut, voiceEnabled, voiceShortcut, voiceOriginalShortcut, voiceAutoStop, voicePopupPosition, voiceSoundEnabled, uiFont, uiScale, soundEnabled, loadingEnabled, appEnabled, uiLanguage, autoSave]);
+  }, [settingsLoaded, apiKey, provider, model, customBaseURL, customModel, shortcut, popupShortcut, terminalShortcut, sourceLang, targetLang, autoStart, enhanceEnabled, enhanceShortcut, voiceEnabled, voiceShortcut, voiceOriginalShortcut, voiceAutoStop, voiceHoldToTalk, voicePopupPosition, voiceSoundEnabled, uiFont, uiScale, soundEnabled, loadingEnabled, appEnabled, uiLanguage, autoSave]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1249,8 +1251,38 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                     </div>
 
                     {/* Compact 2-column grid: label-on-top cells, descriptions moved to tooltips.
-                        Pairs: (stop mode | silence pause) and (max length | microphone). */}
+                        Pair related controls; the microphone spans the full row to avoid an empty cell. */}
                     <div className="grid grid-cols-2 gap-2">
+                      {/* Shortcut mode */}
+                      <div className="bg-[#1e1e1e] rounded-md px-2.5 py-2 border border-[#3c3c3c]" title={voiceHoldToTalk ? t('voiceHoldDesc') : t('voiceTapDesc')}>
+                        <span className="text-[11px] text-white/50 block mb-1">{t('voiceShortcutMode')}</span>
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setVoiceHoldToTalk(false)}
+                            className={`px-2 py-1.5 rounded text-[11px] font-medium border transition-colors ${
+                              !voiceHoldToTalk
+                                ? 'bg-cyan-600 text-white border-cyan-500'
+                                : 'bg-transparent text-white/60 border-[#3c3c3c] hover:bg-white/5'
+                            }`}
+                          >
+                            {t('voiceTapLabel')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVoiceHoldToTalk(true)}
+                            className={`px-2 py-1.5 rounded text-[11px] font-medium border transition-colors ${
+                              voiceHoldToTalk
+                                ? 'bg-cyan-600 text-white border-cyan-500'
+                                : 'bg-transparent text-white/60 border-[#3c3c3c] hover:bg-white/5'
+                            }`}
+                          >
+                            {t('voiceHoldLabel')}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-white/40 mt-1">{t(voiceHoldToTalk ? 'voiceHoldHint' : 'voiceTapHint')}</p>
+                      </div>
+
                       {/* Stop mode */}
                       <div className="bg-[#1e1e1e] rounded-md px-2.5 py-2 border border-[#3c3c3c]" title={voiceAutoStop ? t('voiceAutoStopDesc') : t('voiceManualDesc')}>
                         <span className="text-[11px] text-white/50 block mb-1">{t('voiceStopMode')}</span>
@@ -1332,7 +1364,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                         <p className="text-[10px] text-white/35 mt-1 leading-snug">{t('voiceMaxHint')}</p>
                       </div>
                       {/* Microphone */}
-                      <div className="bg-[#1e1e1e] rounded-md px-2.5 py-2 border border-[#3c3c3c]" title={t('micDeviceDesc')}>
+                      <div className="col-span-2 bg-[#1e1e1e] rounded-md px-2.5 py-2 border border-[#3c3c3c]" title={t('micDeviceDesc')}>
                         <span className="text-[11px] text-white/50 block mb-1">
                           {t('micDeviceLabel')}
                           {lastMicUsed && <span className="text-cyan-300/70"> · 🎙 {lastMicUsed}</span>}

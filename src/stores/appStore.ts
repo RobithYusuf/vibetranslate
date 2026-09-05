@@ -12,6 +12,7 @@ import {
   DEFAULT_TERMINAL_SHORTCUT,
   DEFAULT_VOICE_SHORTCUT,
   DEFAULT_VOICE_ORIGINAL_SHORTCUT,
+  DEFAULT_VOICE_HOLD_TO_TALK,
   DEFAULT_VOICE_AUTO_STOP,
   DEFAULT_VOICE_ENABLED,
   DEFAULT_VOICE_POPUP_POSITION,
@@ -67,6 +68,7 @@ interface AppState {
   voiceShortcut: string;
   voiceOriginalShortcut: string;
   voiceAutoStop: boolean; // true = auto-stop on silence (BETA); false = manual (press shortcut again)
+  voiceHoldToTalk: boolean; // true = hold shortcut while speaking, release to stop
   voiceMaxMinutes: number; // safety cap for one recording, in minutes (system audio stays muted while recording)
   voiceSilenceSec: number; // AUTO-STOP only: how long a pause ends the utterance (seconds)
   micDeviceId: string; // preferred microphone deviceId ('' = system default)
@@ -138,6 +140,7 @@ interface AppState {
   // Voice setters
   setVoiceEnabled: (enabled: boolean) => void;
   setVoiceAutoStop: (enabled: boolean) => void;
+  setVoiceHoldToTalk: (enabled: boolean) => void;
   setVoiceMaxMinutes: (minutes: number) => void;
   setVoiceSilenceSec: (seconds: number) => void;
   setMicDeviceId: (deviceId: string) => void;
@@ -219,6 +222,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   voiceShortcut: DEFAULT_VOICE_SHORTCUT,
   voiceOriginalShortcut: DEFAULT_VOICE_ORIGINAL_SHORTCUT,
   voiceAutoStop: DEFAULT_VOICE_AUTO_STOP,
+  voiceHoldToTalk: DEFAULT_VOICE_HOLD_TO_TALK,
   voiceMaxMinutes: DEFAULT_VOICE_MAX_MINUTES,
   voiceSilenceSec: DEFAULT_VOICE_SILENCE_SEC,
   micDeviceId: '',
@@ -291,6 +295,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Voice setters
   setVoiceEnabled: (enabled) => set({ voiceEnabled: enabled }),
   setVoiceAutoStop: (enabled) => set({ voiceAutoStop: enabled }),
+  setVoiceHoldToTalk: (voiceHoldToTalk) => set({ voiceHoldToTalk }),
   setVoiceMaxMinutes: (voiceMaxMinutes) => set({ voiceMaxMinutes }),
   setVoiceSilenceSec: (voiceSilenceSec) => set({ voiceSilenceSec }),
   setMicDeviceId: (micDeviceId) => set({ micDeviceId }),

@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.48',
+    date: '2026-09-05',
+    changes: [
+      'Voice shortcuts now support an optional Hold to talk mode; the default press-to-toggle behavior stays unchanged',
+      'The listening overlay is more compact, stays above other apps, and keeps its countdown, engine label, and Done/Cancel controls aligned',
+      'Voice settings now explain the shortcut mode and microphone controls more clearly',
+    ],
+  },
+  {
     version: '1.0.47',
     date: '2026-08-11',
     changes: [

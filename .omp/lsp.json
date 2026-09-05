@@ -1,0 +1,31 @@
+{
+  "servers": {
+    "typescript-language-server": {
+      "args": ["--stdio"],
+      "rootMarkers": ["package.json", "tsconfig.json"]
+    },
+    "astro": {
+      "command": "pnpm",
+      "args": ["--dir", "landing", "exec", "astro-ls", "--stdio"],
+      "fileTypes": [".astro"],
+      "languageId": "astro",
+      "rootMarkers": ["landing"],
+      "initOptions": {
+        "typescript": {
+          "tsdk": "../node_modules/typescript/lib"
+        },
+        "contentIntellisense": true
+      }
+    },
+    "rust-analyzer": {
+      "rootMarkers": ["src-tauri"],
+      "capabilities": {
+        "flycheck": true,
+        "ssr": true,
+        "expandMacro": true,
+        "runnables": true,
+        "relatedTests": true
+      }
+    }
+  }
+}

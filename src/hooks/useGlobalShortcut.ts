@@ -9,6 +9,7 @@ interface UseGlobalShortcutOptions {
   shortcut: string;
   onTrigger: () => void;
   enabled?: boolean;
+  onRelease?: () => void;
 }
 
 // A standalone function key (F1–F24) is a valid global hotkey on its own.
@@ -31,6 +32,7 @@ const globalRegistry = new Map<string, boolean>();
 export function useGlobalShortcut({
   shortcut,
   onTrigger,
+  onRelease,
   enabled = true,
 }: UseGlobalShortcutOptions) {
   const [isActive, setIsActive] = useState(false);
@@ -38,12 +40,17 @@ export function useGlobalShortcut({
   
   // Use ref for callback to avoid re-registration
   const onTriggerRef = useRef(onTrigger);
+  const onReleaseRef = useRef(onRelease);
   const lastShortcutRef = useRef<string | null>(null);
   
   // Update callback ref
   useEffect(() => {
     onTriggerRef.current = onTrigger;
   }, [onTrigger]);
+
+  useEffect(() => {
+    onReleaseRef.current = onRelease;
+  }, [onRelease]);
 
   useEffect(() => {
     // If disabled, unregister the shortcut
@@ -108,6 +115,8 @@ export function useGlobalShortcut({
           if (event.state === 'Pressed') {
             console.log(`⚡ [Shortcut] Triggered: ${shortcut}`);
             onTriggerRef.current();
+          } else if (event.state === 'Released') {
+            onReleaseRef.current?.();
           }
         });
 

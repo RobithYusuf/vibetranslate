@@ -9,6 +9,7 @@ export const DEFAULT_TERMINAL_SHORTCUT = 'CommandOrControl+Alt+Shift+T';
 // Voice-to-Text shortcuts: press to start recording, press again to stop & process
 export const DEFAULT_VOICE_SHORTCUT = 'CommandOrControl+Alt+V'; // voice → translate
 export const DEFAULT_VOICE_ORIGINAL_SHORTCUT = 'CommandOrControl+Alt+Shift+V'; // voice → raw transcription
+export const DEFAULT_VOICE_HOLD_TO_TALK = false; // false = press twice, true = hold and release
 export const DEFAULT_SOURCE_LANG: SupportedLanguage = 'auto';
 export const DEFAULT_TARGET_LANG: SupportedLanguage = 'en';
 // Speech-to-text reuses the translation source language (the "From" setting). When that is
@@ -303,7 +304,7 @@ export const STT_PROVIDERS: {
 export const VOICE_STATUS_MESSAGES: Record<string, string> = {
   idle: '',
   starting: 'Getting ready…',
-  recording: 'Listening…',
+  recording: 'Listening',
   transcribing: 'Transcribing…',
   translating: 'Translating…',
   cleaning: 'Tidying…',

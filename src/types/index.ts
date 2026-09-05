@@ -79,6 +79,7 @@ export interface Settings {
   voiceShortcut: string;
   voiceOriginalShortcut: string;
   voiceAutoStop: boolean; // true = stop on silence (VAD); false = manual (press shortcut again)
+  voiceHoldToTalk: boolean; // true = hold shortcut while speaking; false = press to toggle
   // Appearance
   uiFont: string;  // FONT_OPTIONS id
   uiScale: string; // UI_SCALE_OPTIONS id

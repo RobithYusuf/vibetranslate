@@ -21,10 +21,10 @@ import logo from '@/assets/logo.png';
 
 function App() {
   const { shortcut, popupShortcut, terminalShortcut, enhanceEnabled, enhanceShortcut, appEnabled,
-    voiceEnabled, voiceShortcut, voiceOriginalShortcut, uiFont, uiScale, recordingShortcut,
+    voiceEnabled, voiceShortcut, voiceOriginalShortcut, voiceHoldToTalk, uiFont, uiScale, recordingShortcut,
     voiceLiveMode } = useAppStore();
   const { translate, translatePopup, translateTerminal, enhance, enhancePopup, enhanceTerminal } = useTranslation();
-  const { voiceTranslate, voiceOriginal } = useVoiceInput();
+  const { voiceTranslate, voiceOriginal, startVoice, stopVoice } = useVoiceInput();
   const { loading: statusLoading, shouldShowPaywall, checkStatus } = useAppStatus();
   const [paywallDismissed, setPaywallDismissed] = useState(false);
 
@@ -104,8 +104,8 @@ function App() {
       [popupShortcut, enhanceEnabled ? enhancePopup : translatePopup, true],
       [terminalShortcut, enhanceEnabled ? enhanceTerminal : translateTerminal, true],
       [enhanceShortcut, enhance, true],
-      [voiceShortcut, voiceTranslate, voiceEnabled],
-      [voiceOriginalShortcut, voiceOriginal, voiceEnabled],
+      [voiceShortcut, voiceHoldToTalk ? () => { void startVoice('translate'); } : voiceTranslate, voiceEnabled],
+      [voiceOriginalShortcut, voiceHoldToTalk ? () => { void startVoice('original'); } : voiceOriginal, voiceEnabled],
     ];
     for (const [sc, action, enabled] of bindings) {
       if (enabled && encodeMouseShortcut(sc) === key) {
@@ -117,10 +117,21 @@ function App() {
       }
     }
   };
+  const mouseReleaseRef = useRef<(key: number) => void>(() => {});
+  mouseReleaseRef.current = (key: number) => {
+    if (!appEnabled || !voiceEnabled || !voiceHoldToTalk) return;
+    if (key === encodeMouseShortcut(voiceShortcut) || key === encodeMouseShortcut(voiceOriginalShortcut)) {
+      stopVoice();
+    }
+  };
   useEffect(() => {
     if (!isMainWindow) return;
     const unlisten = listen<number>('global-mouse-button', (e) => mouseTriggerRef.current(e.payload));
-    return () => { unlisten.then((fn) => fn()); };
+    const unlistenRelease = listen<number>('global-mouse-button-release', (e) => mouseReleaseRef.current(e.payload));
+    return () => {
+      unlisten.then((fn) => fn());
+      unlistenRelease.then((fn) => fn());
+    };
   }, [isMainWindow]);
 
   // The native mouse hook fails to start until Accessibility is granted. restart_mouse_hook is a
@@ -201,17 +212,19 @@ function App() {
     enabled: isMainWindow && appEnabled,
   });
 
-  // Voice → Translate: press to record, press again to transcribe + translate + paste
+  // Voice → Translate: tap to toggle, or hold while speaking when enabled in Settings.
   useGlobalShortcut({
     shortcut: voiceShortcut,
-    onTrigger: voiceTranslate,
+    onTrigger: voiceHoldToTalk ? () => { void startVoice('translate'); } : voiceTranslate,
+    onRelease: voiceHoldToTalk ? stopVoice : undefined,
     enabled: isMainWindow && appEnabled && voiceEnabled,
   });
 
-  // Voice → Original: press to record, press again to transcribe (raw) + paste
+  // Voice → Original: tap to toggle, or hold while speaking when enabled in Settings.
   useGlobalShortcut({
     shortcut: voiceOriginalShortcut,
-    onTrigger: voiceOriginal,
+    onTrigger: voiceHoldToTalk ? () => { void startVoice('original'); } : voiceOriginal,
+    onRelease: voiceHoldToTalk ? stopVoice : undefined,
     enabled: isMainWindow && appEnabled && voiceEnabled,
   });
 
