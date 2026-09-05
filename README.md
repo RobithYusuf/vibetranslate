@@ -4,7 +4,7 @@
 
 <h1 align="center">VibeTranslate</h1>
 
-<p align="center"><strong>AI translation + voice dictation for macOS &amp; Windows — free, and fully offline-capable.</strong></p>
+<p align="center"><strong>AI translation + voice dictation for macOS, Windows &amp; Linux — free, and fully offline-capable.</strong></p>
 
 <p align="center">
   Select text → shortcut → replaced instantly. &nbsp;Or 🎙️ speak → transcribe/translate → pasted at your cursor.
@@ -18,7 +18,7 @@
 
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey">
   <img alt="Built with" src="https://img.shields.io/badge/built%20with-Tauri%202%20%C2%B7%20React%2019%20%C2%B7%20Rust-orange">
   <img alt="Offline" src="https://img.shields.io/badge/offline-speech%20%2B%20translation-success">
 </p>
@@ -26,6 +26,10 @@
 <p align="center"><sub>🇮🇩 Dibuat di Indonesia — untuk yang berpikir dalam Bahasa Indonesia tapi menulis dalam bahasa Inggris.</sub></p>
 
 ---
+
+This public repository contains the **desktop application and release tooling only**.
+The website, backend services, and internal deployment sources are maintained separately
+in a private repository. The live website is public; its source is not part of this repository.
 
 <p align="center">
   <img src="screenshots/settings-general.png" width="760" alt="VibeTranslate settings: pick the free built-in engine or your own API key, set languages, and see every shortcut in one place">
@@ -88,8 +92,8 @@ model is present, so you will not see it in a normal install.)
 
 Defaults (all customizable in **Settings → Shortcuts**):
 
-| Action | macOS | Windows |
-|--------|-------|---------|
+| Action | macOS | Windows / Linux |
+|--------|-------|-----------------|
 | Translate & Replace | `Cmd+Alt+T` | `Ctrl+Alt+T` |
 | Translate & Popup | `Cmd+Alt+P` | `Ctrl+Alt+P` |
 | CLI Translate (Replace) | `Cmd+Alt+Shift+T` | `Ctrl+Alt+Shift+T` |
@@ -104,6 +108,19 @@ Get it from [vibetranslate.id/download](https://vibetranslate.id/download) or [R
 - **macOS** — open the DMG, drag to Applications, then grant **Accessibility** when prompted
   (needed to copy the selection and paste the result). Microphone is only requested for voice.
 - **Windows** — run the installer or the portable `.exe`. Lives in the system tray.
+- **Linux (x86_64)** — use the AppImage, or install the `.deb` on Debian/Ubuntu:
+
+  ```bash
+  chmod +x VibeTranslate_x86_64.AppImage
+  ./VibeTranslate_x86_64.AppImage
+  # Debian/Ubuntu alternative:
+  sudo apt install ./VibeTranslate_amd64.deb
+  ```
+
+  Linux packages are built on Ubuntu 24.04. Other distributions need compatible system
+  libraries. Global shortcuts and selection/paste automation depend on desktop permissions;
+  Wayland compositors may restrict them. Use an X11 session if those operations are blocked.
+  Extra mouse-button shortcuts are currently supported on macOS and Windows, not Linux.
 
 The installers are **not code-signed or notarized** (an Apple Developer account is $99/year
 and Windows certificates are a recurring cost). So the first launch needs one extra step:
@@ -126,11 +143,20 @@ the project's own minisign key, and the app refuses any update it cannot verify.
 ```bash
 pnpm install
 pnpm tauri:dev      # run in dev
-pnpm build:local    # build installers (dmg / nsis / msi)
+pnpm build:local    # build installers for the current platform
 ```
 
 Prerequisites: Rust, Node.js 22.13+ and pnpm 11. Windows also needs Visual Studio C++ Build Tools.
 A build from source is fully functional — including the built-in free server.
+
+For Linux builds, install the native dependencies used by the Ubuntu 24.04 release job:
+
+```bash
+sudo apt-get install -y build-essential curl file libasound2-dev \
+  libayatana-appindicator3-dev libclang-dev libssl-dev libwebkit2gtk-4.1-dev \
+  libxdo-dev librsvg2-dev patchelf pkg-config
+pnpm build:local --bundles appimage,deb
+```
 
 Two things that will otherwise waste your afternoon:
 

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 
 // A deletion commit is insufficient: private source must not exist in reachable history.
-const privateDirectories = ['landing', 'server', 'worker'];
+const privateDirectories = ['server', 'worker', 'admin', 'landing', 'docker', 'docs', 'packaging'];
 const refs = process.argv.slice(2);
 for (const ref of refs.length ? refs : ['HEAD']) {
   const commit = execFileSync('git', [
