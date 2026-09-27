@@ -197,6 +197,8 @@ pub async fn show_popup(app: AppHandle) -> Result<(), String> {
                 center_on_active_monitor(&window);
             }
         }
+        #[cfg(target_os = "macos")]
+        set_popup_spaces(&window);
         // Show WITHOUT focus. A focused popup is the root of the "jumps to the primary
         // monitor and copy fails" bug: the next translate hides the still-focused popup,
         // macOS hands key status to our main window (primary display), and the Cmd+C then
@@ -220,8 +222,27 @@ pub async fn show_popup(app: AppHandle) -> Result<(), String> {
 
         let window = builder.build().map_err(|e: tauri::Error| e.to_string())?;
         center_on_active_monitor(&window); // .center() targets the primary display
+        #[cfg(target_os = "macos")]
+        set_popup_spaces(&window);
     }
     Ok(())
+}
+
+// The popup is reused, and a normal macOS window belongs to the Space it was first shown on.
+// Popup Translate on Desktop 3 then showed the result on Desktop 2, where the window had been
+// created, and over a fullscreen app it never appeared at all. moveToActiveSpace brings it to
+// the desktop the user is on; fullScreenAuxiliary lets it sit over a fullscreen app. Not
+// canJoinAllSpaces like the overlays: this is an interactive window the user may leave open,
+// and it should not follow them onto every desktop.
+#[cfg(target_os = "macos")]
+fn set_popup_spaces(window: &tauri::WebviewWindow) {
+    use cocoa::base::id;
+    use objc::{msg_send, sel, sel_impl};
+    let _ = window.with_webview(|webview| unsafe {
+        let ns_window = webview.ns_window() as id;
+        let behavior: u64 = (1 << 1) | (1 << 8); // moveToActiveSpace | fullScreenAuxiliary
+        let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+    });
 }
 
 #[tauri::command]
@@ -786,17 +807,17 @@ pub async fn play_sound(sound_type: String) -> Result<(), String> {
             _ => "Pop",
         };
         
-        let script = format!(
-            r#"do shell script "afplay /System/Library/Sounds/{}.aiff &""#,
-            sound_name
-        );
-        
+        // afplay directly. Going through osascript -> sh -> afplay cost three processes and
+        // ~175ms of AppleScript start-up before the sound, which made the "start" cue land
+        // after the action it was announcing.
+        let path = format!("/System/Library/Sounds/{}.aiff", sound_name);
+
         // Reap it. Rust's Child has no Drop that waits, so a spawn-and-forget leaves a zombie
         // for the lifetime of the app — and this fires on every translate start, success and
         // error. A long-running menu-bar app accumulates them until fork() starts failing for
         // the whole login session, which then breaks unrelated programs and looks like
         // anything but a sound effect.
-        if let Ok(mut child) = Command::new("osascript").arg("-e").arg(&script).spawn() {
+        if let Ok(mut child) = Command::new("/usr/bin/afplay").arg(&path).spawn() {
             std::thread::spawn(move || {
                 let _ = child.wait();
             });

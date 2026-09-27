@@ -10,6 +10,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.51',
+    date: '2026-09-27',
+    changes: [
+      'Voice: cancelling and starting again quickly no longer leaves the microphone on or pastes the old dictation into the new one, and a quick second press now stops the recording',
+      'Voice: unplugging the microphone mid-recording finishes with what was captured instead of hanging on "Transcribing…"',
+      'Voice: hold-to-talk with a mouse button always stops, whichever button or key you let go of first',
+      'Offline Whisper engine now transcribes dictations longer than 30 seconds in full',
+      'The translation popup follows you to the current desktop and shows over fullscreen apps on macOS',
+      'Mouse shortcuts are kept after a restart instead of resetting to the default',
+      'A custom provider without a base URL is now refused instead of sending its key to OpenAI',
+      'Reaching the free daily limit now says so, instead of reporting the server as unreachable. Slow providers time out after 30 seconds',
+      'Windows: copy and paste work with Russian, Arabic, Greek and other non-Latin keyboard layouts, terminals are detected by their program instead of the window title, and long dictations paste into the window you started in',
+      'Linux: CLI Translate uses Ctrl+Shift+C/V, so it no longer interrupts the running program',
+    ],
+  },
+  {
     version: '1.0.50',
     date: '2026-09-27',
     changes: [

@@ -59,6 +59,16 @@ fn linux_clear_line(chars: usize) -> Result<(), String> {
 }
 use once_cell::sync::Lazy;
 
+// Windows Ctrl+C / Ctrl+V by VIRTUAL key, not by character. Key::Unicode('c') makes enigo look
+// the character up in the active keyboard layout (VkKeyScanW); Russian, Ukrainian, Greek,
+// Arabic, Hebrew and Thai layouts have no Latin "c", so every copy and paste failed with a
+// mapping error. Applications match Ctrl shortcuts on the virtual key, which exists in every
+// layout.
+#[cfg(target_os = "windows")]
+const KEY_C: enigo::Key = enigo::Key::Other(0x43); // VK_C
+#[cfg(target_os = "windows")]
+const KEY_V: enigo::Key = enigo::Key::Other(0x56); // VK_V
+
 /// Escape a string for safe interpolation inside an AppleScript double-quoted literal.
 /// Without this, an app name containing `"` could close the string and inject
 /// `do shell script "..."` → arbitrary code execution. We escape `\` and `"`, strip all
@@ -377,8 +387,15 @@ fn get_frontmost_app() -> Result<String, String> {
 
 // Check if an app/window should be excluded from tracking
 fn is_our_app(name: &str) -> bool {
-    // Exclude windows with empty or very short titles (like our loading window)
-    if name.trim().is_empty() || name.trim().len() < 3 {
+    // Exclude windows with empty titles (our loading and recording windows have none).
+    if name.trim().is_empty() {
+        return true;
+    }
+    // Windows reports window TITLES here, and very short ones are overlays or system chrome.
+    // macOS reports app NAMES, where a short one is a real app ("QQ") that was never tracked,
+    // so the translate copied from and pasted into the previous app instead.
+    #[cfg(target_os = "windows")]
+    if name.trim().chars().count() < 3 {
         return true;
     }
     let lower = name.to_lowercase();
@@ -407,12 +424,14 @@ fn is_our_app(name: &str) -> bool {
     if lower == "translation" {
         return true;
     }
-    // Exclude Windows notification windows that can steal focus
-    if lower.contains("new notification") || lower == "notification" || lower.contains("toast") {
+    // Exclude Windows notification windows that can steal focus. Whole-title matches only: a
+    // substring rule rejected real work ("Toast.tsx - Visual Studio Code") as "ours".
+    if lower.contains("new notification") || lower == "notification" || lower == "toast" {
         return true;
     }
-    // Exclude DevTools windows (they steal focus in dev mode)
-    if lower.contains("devtools") || lower.contains("developer tools") {
+    // Exclude DevTools windows (they steal focus in dev mode). Prefix only, for the same
+    // reason: "devtools.ts - Visual Studio Code" is the user's editor.
+    if lower.starts_with("devtools") || lower.starts_with("developer tools") {
         return true;
     }
     // Exclude Tauri dev windows
@@ -440,6 +459,13 @@ pub fn start_app_tracker() {
         const REFRESH_EVERY_TICKS: u32 = 16;
         #[cfg(target_os = "macos")]
         let mut ticks_since_reading: u32 = 0;
+        // The cheap name seen at the last full reading. The fast check must compare cheap to
+        // cheap: NSWorkspace's localizedName differs from the System Events name for some apps
+        // ("IntelliJ IDEA" vs "idea", "Android Studio" vs "studio", every localized system app
+        // on a non-English Mac). Against LAST_ACTIVE_APP those never matched, so the tracker
+        // ran osascript on every tick for as long as such an app was in front.
+        #[cfg(target_os = "macos")]
+        let mut last_cheap: Option<String> = None;
         loop {
             // While an operation has pinned the target, don't overwrite it.
             if tracker_is_paused() {
@@ -464,10 +490,11 @@ pub fn start_app_tracker() {
                     continue;
                 }
 
-                let unchanged = match (&cheap_name, LAST_ACTIVE_APP.lock().ok().as_deref()) {
-                    (Some(now), Some(Some(prev))) => now == prev,
-                    _ => false,
-                };
+                let unchanged = cheap_name.is_some() && cheap_name == last_cheap
+                    || match (&cheap_name, LAST_ACTIVE_APP.lock().ok().as_deref()) {
+                        (Some(now), Some(Some(prev))) => now == prev,
+                        _ => false,
+                    };
                 let have_pos = LAST_ACTIVE_WIN_POS.lock().ok().map(|g| g.is_some()).unwrap_or(false);
                 // Moving a window WITHIN one app changes its position without changing the name,
                 // and nothing tells us about it. A slow refresh bounds how stale that can get at
@@ -483,6 +510,7 @@ pub fn start_app_tracker() {
                 // reading, whose coordinates match what the rest of the code compares against.
                 if let Ok((app, pos)) = get_frontmost_app_and_window() {
                     if !is_our_app(&app) {
+                        last_cheap = cheap_name.clone();
                         if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
                             let prev = guard.clone();
                             *guard = Some(app.clone());
@@ -616,46 +644,56 @@ fn detect_terminal_type(hwnd: windows::Win32::Foundation::HWND) -> TerminalType 
     
     dlog!("[detect_terminal_type] Title: '{}', Process: '{}'", window_title, process_name);
     
-    // --- VS Code Detection ---
+    // The process name is authoritative when we have it. Window titles are what the user or
+    // the running program set: a Chrome tab titled "Terminal - GitHub" is not a terminal, and
+    // Windows Terminal's title is usually the shell's ("Windows PowerShell"), which the title
+    // rules below would misread as a legacy console. Titles are only a fallback for when the
+    // process could not be queried.
+    let known = !process_name.is_empty();
+
+    // --- VS Code Detection (and its forks) ---
     // VS Code terminal retains selection even after focus loss.
     // Check first because VS Code title may contain project paths.
-    if process_name.contains("code") 
-        || window_title.contains("visual studio code") 
-        || window_title.contains("- code") 
+    let vscode_proc = matches!(
+        process_name.as_str(),
+        "code.exe" | "code - insiders.exe" | "vscodium.exe" | "cursor.exe" | "windsurf.exe"
+    );
+    if vscode_proc
+        || (!known && (window_title.contains("visual studio code") || window_title.contains("- code")))
     {
         dlog!("[detect_terminal_type] Detected: VSCode");
         return TerminalType::VSCode;
     }
-    
+
     // --- Windows Terminal Detection ---
     // Modern terminal with Ctrl+Shift+C/V support
-    if process_name == "windowsterminal.exe" 
-        || process_name == "wt.exe" 
-        || window_title.contains("windows terminal") 
+    if process_name == "windowsterminal.exe"
+        || process_name == "wt.exe"
+        || (!known && window_title.contains("windows terminal"))
     {
         dlog!("[detect_terminal_type] Detected: WindowsTerminal");
         return TerminalType::WindowsTerminal;
     }
-    
+
     // --- Legacy Console Detection ---
     // CMD.exe or PowerShell running in conhost (legacy console host).
     // Title often shows full path: "C:\WINDOWS\system32\cmd.exe"
-    let is_legacy_console = 
-        process_name == "conhost.exe" 
-        || process_name == "cmd.exe" 
-        || process_name == "powershell.exe"
-        || window_title.contains("cmd.exe") 
-        || window_title.contains("command prompt") 
-        || (window_title.contains("powershell") && !window_title.contains("windows terminal"));
-    
+    let is_legacy_console = matches!(
+        process_name.as_str(),
+        "conhost.exe" | "openconsole.exe" | "cmd.exe" | "powershell.exe" | "pwsh.exe"
+    ) || (!known
+        && (window_title.contains("cmd.exe")
+            || window_title.contains("command prompt")
+            || (window_title.contains("powershell") && !window_title.contains("windows terminal"))));
+
     if is_legacy_console {
         dlog!("[detect_terminal_type] Detected: LegacyConsole");
         return TerminalType::LegacyConsole;
     }
-    
-    // --- Fallback: Generic "terminal" in title ---
+
+    // --- Fallback: Generic "terminal" in title (process unknown only) ---
     // Assume modern Windows Terminal if just "terminal" appears
-    if window_title.contains("terminal") {
+    if !known && window_title.contains("terminal") {
         dlog!("[detect_terminal_type] Detected: WindowsTerminal (from title fallback)");
         return TerminalType::WindowsTerminal;
     }
@@ -666,12 +704,11 @@ fn detect_terminal_type(hwnd: windows::Win32::Foundation::HWND) -> TerminalType 
 
 /// Helper function to get process name from HWND.
 /// 
-/// Uses Windows APIs: GetWindowThreadProcessId → OpenProcess → GetModuleBaseNameW
+/// Uses Windows APIs: GetWindowThreadProcessId → OpenProcess → QueryFullProcessImageNameW
 #[cfg(target_os = "windows")]
 fn get_process_name_from_hwnd(hwnd: windows::Win32::Foundation::HWND) -> String {
     use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows::Win32::System::ProcessStatus::GetModuleBaseNameW;
     
     unsafe {
         // Get process ID from window handle
@@ -687,18 +724,51 @@ fn get_process_name_from_hwnd(hwnd: windows::Win32::Foundation::HWND) -> String 
         
         match process_handle {
             Ok(handle) => {
-                let mut name_buffer: [u16; 260] = [0; 260];
-                let name_length = GetModuleBaseNameW(handle, None, &mut name_buffer);
+                let name = process_exe_name(handle);
                 let _ = windows::Win32::Foundation::CloseHandle(handle);
-                
-                if name_length > 0 {
-                    String::from_utf16_lossy(&name_buffer[..name_length as usize]).to_lowercase()
-                } else {
-                    String::new()
-                }
+                name.map(|n| n.to_lowercase()).unwrap_or_default()
             }
             Err(_) => String::new()
         }
+    }
+}
+
+// Executable file name ("WindowsTerminal.exe") of an opened process.
+//
+// GetModuleBaseNameW needs PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, but callers open the
+// process with PROCESS_QUERY_LIMITED_INFORMATION (the only right that works on elevated and
+// protected processes). It failed every time, so every process-name check was dead and
+// terminal detection ran on window titles alone: a Chrome tab titled "Terminal - GitHub" got
+// Ctrl+Shift+C, which opens DevTools. QueryFullProcessImageNameW works with the limited right.
+#[cfg(target_os = "windows")]
+unsafe fn process_exe_name(handle: windows::Win32::Foundation::HANDLE) -> Option<String> {
+    use windows::Win32::System::Threading::{QueryFullProcessImageNameW, PROCESS_NAME_WIN32};
+    let mut buf = [0u16; 1024];
+    let mut len = buf.len() as u32;
+    QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut len).ok()?;
+    let full = String::from_utf16_lossy(&buf[..len as usize]);
+    full.rsplit(|c| c == '\\' || c == '/').next().filter(|n| !n.is_empty()).map(|n| n.to_string())
+}
+
+/// Whether the captured target window is a terminal, judged by its PROCESS (see
+/// detect_terminal_type). The frontend used to decide this by matching the window title
+/// against "cmd"/"terminal"/"powershell", so an editor showing cmd.go, or a browser tab about
+/// Windows Terminal, took the terminal-replace path: End + backspaces erased the end of the
+/// user's line, and the copy sent Ctrl+Shift+C (DevTools in a browser).
+#[tauri::command]
+pub async fn target_is_terminal() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let hwnd_val = LAST_ACTIVE_HWND.lock().map(|g| *g).unwrap_or(0);
+        if hwnd_val == 0 {
+            return false;
+        }
+        let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut std::ffi::c_void);
+        !matches!(detect_terminal_type(hwnd), TerminalType::Unknown)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
     }
 }
 
@@ -958,7 +1028,7 @@ fn try_get_terminal_selection() -> Option<String> {
     match get_terminal_selection_from_hwnd(hwnd) {
         Ok(text) => {
             dlog!("[try_get_terminal_selection] SUCCESS! Got: '{}'", 
-                if text.len() > 30 { format!("{}...", &text[..30]) } else { text.clone() });
+                if text.chars().count() > 30 { format!("{}...", text.chars().take(30).collect::<String>()) } else { text.clone() });
             Some(text)
         }
         Err(e) => {
@@ -1131,7 +1201,7 @@ pub async fn save_active_app() -> Result<String, String> {
 // Capture foreground HWND immediately - call this at the START of translate
 // before any windows are shown or focus changes
 #[tauri::command]
-pub async fn capture_foreground_hwnd(live: bool) -> Result<String, String> {
+pub async fn capture_foreground_hwnd(live: bool, long_pin: Option<bool>) -> Result<String, String> {
     // Pin the target: from here until the paste, the background tracker won't overwrite it, so a
     // Cmd-Tab (or an overlay) mid-operation can't redirect the paste to the wrong app. The paste
     // (or a cancel) lifts the pin; the expiry is only a safety net for an op that died. It must
@@ -1139,7 +1209,10 @@ pub async fn capture_foreground_hwnd(live: bool) -> Result<String, String> {
     // 15 minutes, and on Windows the paste re-reads the live tracker slot — with a 60s pin the
     // tracker resumed mid-dictation and a final transcript aimed at Slack landed in the browser
     // the user had alt-tabbed to.
-    pause_tracker(if live { 60 } else { 16 * 60 });
+    //
+    // The pin length is its own flag, not `live`: voice switched to live=true (a fresh reading
+    // of the frontmost window), which silently cut its pin to 60s and brought that bug back.
+    pause_tracker(if long_pin.unwrap_or(!live) { 16 * 60 } else { 60 });
 
     #[cfg(target_os = "macos")]
     {
@@ -1310,9 +1383,9 @@ pub async fn capture_and_copy() -> Result<String, String> {
         
         enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
         std::thread::sleep(std::time::Duration::from_millis(30));
-        enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
+        enigo.key(KEY_C, Direction::Press).map_err(|e| e.to_string())?;
         std::thread::sleep(std::time::Duration::from_millis(30));
-        enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
+        enigo.key(KEY_C, Direction::Release).map_err(|e| e.to_string())?;
         std::thread::sleep(std::time::Duration::from_millis(30));
         enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
         
@@ -1422,6 +1495,10 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
+        // Hold-to-talk and mouse "⌥+Back" stops can reach the paste while Cmd/Opt are still
+        // physically held, and the target then gets Cmd+Opt+V, which is not paste. The copy
+        // path already waits; the paste paths did not.
+        wait_modifiers_released(800);
         // Activate the SAVED target terminal first — without this, the Ctrl+C + Cmd+V lands on
         // whatever is frontmost (e.g. our own settings window while the user watches the console).
         let app_name = LAST_ACTIVE_APP.lock().ok().and_then(|g| g.clone());
@@ -1552,9 +1629,9 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
                 dlog!("[terminal_replace] VSCode: Ctrl+V");
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
             }
@@ -1565,9 +1642,9 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 enigo.key(Key::Shift, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Shift, Direction::Release).map_err(|e| e.to_string())?;
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
@@ -1579,9 +1656,9 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
                 dlog!("[terminal_replace] Legacy/Unknown: Ctrl+V");
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                enigo.key(Key::Unicode('v'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                enigo.key(Key::Unicode('v'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
             }
@@ -1595,7 +1672,9 @@ pub async fn simulate_terminal_replace(clear_chars: Option<usize>) -> Result<(),
         if let Some(chars) = clear_chars {
             linux_clear_line(chars)?;
         }
-        linux_send_key_combo('v', false)
+        // Terminals paste with Ctrl+Shift+V; plain Ctrl+V is readline's quoted-insert, so the
+        // line was cleared and nothing was pasted (GNOME Terminal, Konsole, xterm-likes).
+        linux_send_key_combo('v', true)
     }
 }
 
@@ -1774,9 +1853,9 @@ pub async fn simulate_copy() -> Result<(), String> {
                 dlog!("[simulate_copy] VS Code detected: Using Ctrl+C...");
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
             }
@@ -1786,9 +1865,9 @@ pub async fn simulate_copy() -> Result<(), String> {
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 enigo.key(Key::Shift, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Shift, Direction::Release).map_err(|e| e.to_string())?;
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
@@ -1837,9 +1916,9 @@ pub async fn simulate_copy() -> Result<(), String> {
                 dlog!("[simulate_copy] Normal app: Using Ctrl+C...");
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
             }
@@ -1907,9 +1986,9 @@ pub async fn simulate_copy_direct() -> Result<(), String> {
         dlog!("[simulate_copy_direct] Sending Ctrl+C to focused window...");
         enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
         std::thread::sleep(std::time::Duration::from_millis(50));
-        enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
+        enigo.key(KEY_C, Direction::Press).map_err(|e| e.to_string())?;
         std::thread::sleep(std::time::Duration::from_millis(50));
-        enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
+        enigo.key(KEY_C, Direction::Release).map_err(|e| e.to_string())?;
         std::thread::sleep(std::time::Duration::from_millis(50));
         enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
         
@@ -2016,9 +2095,9 @@ pub async fn simulate_terminal_copy() -> Result<(), String> {
                 dlog!("[terminal_copy] VSCode: Ctrl+C");
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
             }
@@ -2029,9 +2108,9 @@ pub async fn simulate_terminal_copy() -> Result<(), String> {
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 enigo.key(Key::Shift, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('c'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_C, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Shift, Direction::Release).map_err(|e| e.to_string())?;
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
@@ -2079,7 +2158,9 @@ pub async fn simulate_terminal_copy() -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        linux_send_key_combo('c', false)
+        // Ctrl+Shift+C: in a terminal plain Ctrl+C is SIGINT, and would kill the running
+        // program (a Claude Code task, a build) instead of copying the selection.
+        linux_send_key_combo('c', true)
     }
 }
 
@@ -2091,6 +2172,7 @@ pub async fn simulate_paste_to_app(app: String, win_x: Option<i32>, win_y: Optio
     resume_tracker(); // uses the explicit target, so the pin (from capture) can lift now
     #[cfg(target_os = "macos")]
     {
+        wait_modifiers_released(800); // see simulate_terminal_replace
         let trimmed = app.trim();
         let script = if trimmed.is_empty() {
             r#"tell application "System Events" to keystroke "v" using command down"#.to_string()
@@ -2167,6 +2249,7 @@ pub async fn restore_focus_to_app(app: String) -> Result<(), String> {
 pub async fn simulate_paste() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
+        wait_modifiers_released(800); // see simulate_terminal_replace
         let app_name = {
             let guard = LAST_ACTIVE_APP.lock().map_err(|e| e.to_string())?;
             guard.clone()
@@ -2260,9 +2343,9 @@ pub async fn simulate_paste() -> Result<(), String> {
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 enigo.key(Key::Shift, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Shift, Direction::Release).map_err(|e| e.to_string())?;
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
@@ -2272,9 +2355,9 @@ pub async fn simulate_paste() -> Result<(), String> {
                 dlog!("[simulate_paste] Using standard Ctrl+V...");
                 enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Press).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Press).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
-                enigo.key(Key::Unicode('v'), Direction::Release).map_err(|e| e.to_string())?;
+                enigo.key(KEY_V, Direction::Release).map_err(|e| e.to_string())?;
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
             }
@@ -2347,8 +2430,7 @@ pub async fn debug_terminal_info() -> Result<String, String> {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-        use windows::Win32::System::ProcessStatus::GetModuleBaseNameW;
-        
+            
         let mut info = String::new();
         info.push_str("=== DEBUG TERMINAL INFO ===\n");
         
@@ -2379,14 +2461,9 @@ pub async fn debug_terminal_info() -> Result<String, String> {
                 } else {
                     let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id);
                     if let Ok(h) = handle {
-                        let mut buffer: [u16; 260] = [0; 260];
-                        let len = GetModuleBaseNameW(h, None, &mut buffer);
+                        let name = process_exe_name(h);
                         let _ = windows::Win32::Foundation::CloseHandle(h);
-                        if len > 0 {
-                            String::from_utf16_lossy(&buffer[..len as usize])
-                        } else {
-                            "unknown".to_string()
-                        }
+                        name.unwrap_or_else(|| "unknown".to_string())
                     } else {
                         "unknown".to_string()
                     }

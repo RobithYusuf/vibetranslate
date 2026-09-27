@@ -45,6 +45,14 @@ static CURRENT_HOLD: AtomicU32 = AtomicU32::new(0);
 // Bitmask of buttons whose DOWN we swallowed, so we also swallow the matching UP.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 static SWALLOWED: AtomicU32 = AtomicU32::new(0);
+// The key each button's DOWN fired, so its UP releases that same key. Rebuilding the key
+// on UP from the live state broke hold-to-talk. If the user let go of the hold button or the
+// keyboard modifier a moment before the trigger, the rebuilt key had no hold/modifier bits,
+// matched no binding, and no release was sent, so the recording never stopped.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const NO_KEY: u32 = u32::MAX;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+static FIRED: [AtomicU32; 32] = [const { AtomicU32::new(NO_KEY) }; 32];
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 
@@ -117,6 +125,9 @@ fn handle_mouse(dom: i64, kb_mods: u32, is_down: bool) -> bool {
                 if let Some(app) = APP.get() {
                     let _ = app.emit("global-mouse-button", key);
                 }
+                if let Some(f) = FIRED.get(d as usize) {
+                    f.store(key, Ordering::Relaxed);
+                }
                 SWALLOWED.fetch_or(dbit, Ordering::Relaxed);
                 return true;
             }
@@ -134,6 +145,9 @@ fn handle_mouse(dom: i64, kb_mods: u32, is_down: bool) -> bool {
             if let Some(app) = APP.get() {
                 let _ = app.emit("global-mouse-button", key);
             }
+            if let Some(f) = FIRED.get(d as usize) {
+                f.store(key, Ordering::Relaxed);
+            }
             SWALLOWED.fetch_or(dbit, Ordering::Relaxed);
             return true;
         }
@@ -145,17 +159,18 @@ fn handle_mouse(dom: i64, kb_mods: u32, is_down: bool) -> bool {
             SWALLOWED.fetch_and(!dbit, Ordering::Relaxed);
             swallow = true;
         }
-        // Tell the frontend about the release of a bound trigger. The held modifier must remain
-        // encoded until after this event so a Hold3+Mouse0 chord releases with the same key.
-        let held = CURRENT_HOLD.load(Ordering::Relaxed);
-        if swallow && (held == 0 || held != d) {
-            let key = d | (kb_mods << 8) | (held << 16);
-            if is_bound(key) {
-                if let Some(app) = APP.get() {
-                    let _ = app.emit("global-mouse-button-release", key);
-                }
+        // Tell the frontend about the release of a trigger, with the exact key its DOWN fired
+        // (see FIRED). A hold button's own DOWN never fires, so releasing it sends nothing.
+        let fired = FIRED
+            .get(d as usize)
+            .map(|f| f.swap(NO_KEY, Ordering::Relaxed))
+            .unwrap_or(NO_KEY);
+        if fired != NO_KEY {
+            if let Some(app) = APP.get() {
+                let _ = app.emit("global-mouse-button-release", fired);
             }
         }
+        let held = CURRENT_HOLD.load(Ordering::Relaxed);
         if d != 0 && held == d {
             CURRENT_HOLD.store(0, Ordering::Relaxed);
         }

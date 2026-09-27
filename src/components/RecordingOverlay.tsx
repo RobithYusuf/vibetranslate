@@ -57,6 +57,21 @@ function reportVoiceError(msg: string): string {
   return short;
 }
 
+// "You were quiet" vs "macOS is not letting us hear you". Without an Apple certificate every
+// update silently revokes the microphone grant while System Settings still shows it ON; the
+// mic then delivers silence, so blaming the user's voice would be wrong far more often than
+// it is right. Used by EVERY no-speech exit: the silent-mic case lands on the VAD and server
+// no-speech paths far more often than on the empty-text one.
+async function noSpeechReason(): Promise<string> {
+  try {
+    const p = await invoke<{ microphone: string }>('permission_status');
+    if (p.microphone === 'denied') return 'Microphone blocked — re-grant it in System Settings';
+    if (p.microphone === 'restricted') return 'Microphone restricted by device policy';
+    if (p.microphone === 'undetermined') return 'Microphone permission not granted yet';
+  } catch { /* status is a nicety; never let it swallow the real outcome */ }
+  return 'No speech detected';
+}
+
 type RunConfig = VoiceStartPayload['config'];
 
 /**
@@ -101,6 +116,8 @@ export default function RecordingOverlay() {
   const sessionIdRef = useRef<number>(-1);         // id of the run we (last) began; blocks re-emit resurrection
   const finishedRef = useRef(false);              // true once a terminal state ran (blocks late process/double-finish)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // deferred hide_recording; cleared on next begin()
+  const captureLiveRef = useRef(false);           // the recorder is actually capturing (set after startRecording)
+  const pendingStopRef = useRef(false);           // a stop arrived during 'starting'; run it once capture is live
 
   // Button click handlers live inside the lifecycle effect's closure (so they share
   // the same refs/AbortController); bridge them out to the JSX buttons via these refs.
@@ -206,6 +223,16 @@ export default function RecordingOverlay() {
       if (processingRef.current || finishedRef.current) return; // never run after a terminal state
       const config = configRef.current;
       if (!config) return;
+      // A stop that arrives before the microphone is live (quick push-to-talk tap, Enter during
+      // "Starting…") had no recorder to stop: it errored with "No active recording", or hung
+      // waiting for a 'stop' event from a recorder that had not started. Run it once capture is up.
+      if (!captureLiveRef.current) { pendingStopRef.current = true; return; }
+      // Every ref below is shared by all sessions, and begin() resets them for the next one. A
+      // run that was cancelled while awaiting something that cannot be aborted (local model,
+      // live finish, PCM conversion) would otherwise wake up inside the NEXT session, paste its
+      // stale text there and end the new recording. Compare against the session it started in.
+      const runId = sessionIdRef.current;
+      const stale = () => cancelledRef.current || sessionIdRef.current !== runId;
       processingRef.current = true;
       cancelledRef.current = false;
       const controller = new AbortController();
@@ -213,6 +240,7 @@ export default function RecordingOverlay() {
       try {
         announce('transcribing');
         const { blob, voicedMs, hadSpeech } = await stopRecording();
+        if (sessionIdRef.current !== runId) return;
         void restoreAudio(); // recording done -> restore audio right away
         // The transcript window's job ended with the recording. Leaving it up while the paste
         // pipeline runs made the whole feature look like it was still listening.
@@ -226,7 +254,9 @@ export default function RecordingOverlay() {
         // truly silent clip. (Previously keyed off the auto-stop *config*, which wrongly discarded
         // real speech when the user hit Done before Silero closed the segment.)
         if (auto && (!hadSpeech || voicedMs < 400)) {
-          announce('error', 'No speech detected');
+          const reason = await noSpeechReason();
+          if (stale()) return;
+          announce('error', reason);
           finishSession('error');
           return;
         }
@@ -288,6 +318,7 @@ export default function RecordingOverlay() {
             signal: controller.signal,
           });
         }
+        if (stale()) return;
         // User correction dictionary: deterministic fixes for habitual mis-hearings, applied to
         // the transcript BEFORE translation/pasting (voice only).
         const transcript = config.voiceCorrections?.length
@@ -314,6 +345,7 @@ export default function RecordingOverlay() {
             console.warn('[Voice] AI tidy failed, pasting raw transcript:', e);
             out = transcript;
           }
+          if (stale()) return;
         }
         // Over the translate cap (~6 min of speech): NEVER discard the user's dictation — fall
         // back to pasting the raw transcript instead of translating it.
@@ -339,23 +371,14 @@ export default function RecordingOverlay() {
           out = r.translatedText;
         }
 
-        if (cancelledRef.current) return; // cancelled during the pipeline -> paste nothing
+        if (stale()) return; // cancelled during the pipeline -> paste nothing
 
         // Nothing to paste is an outcome, not a success: without this, a silent dictation
         // wrote '' to the clipboard (destroying whatever the user had there), pasted
         // nothing, and played the success chime.
         if (!out.trim()) {
-          // Distinguish "you were quiet" from "macOS is not letting us hear you". Without an
-          // Apple certificate every update silently revokes the microphone grant while
-          // System Settings still shows it ON, so blaming the user's voice would be wrong
-          // far more often than it is right.
-          let reason = 'No speech detected';
-          try {
-            const p = await invoke<{ microphone: string }>('permission_status');
-            if (p.microphone === 'denied') reason = 'Microphone blocked — re-grant it in System Settings';
-            else if (p.microphone === 'restricted') reason = 'Microphone restricted by device policy';
-            else if (p.microphone === 'undetermined') reason = 'Microphone permission not granted yet';
-          } catch { /* status is a nicety; never let it swallow the real outcome */ }
+          const reason = await noSpeechReason();
+          if (stale()) return;
           announce('error', reason);
           finishSession('error');
           return;
@@ -370,6 +393,8 @@ export default function RecordingOverlay() {
         announce('done');
         finishSession('done');
       } catch (err) {
+        // A newer session owns the recorder and the overlay now: touching either would end it.
+        if (sessionIdRef.current !== runId) return;
         const msg = err instanceof Error ? err.message : String(err);
         const cancelled = cancelledRef.current
           || (err instanceof DOMException && err.name === 'AbortError')
@@ -378,6 +403,13 @@ export default function RecordingOverlay() {
           console.log('[Voice] Cancelled');
           cancelRecording();
           finishSession('cancel');
+        } else if (/no speech/i.test(msg)) {
+          // Server 422 / empty transcript: same silent-mic question as the other no-speech exits.
+          cancelRecording();
+          const reason = await noSpeechReason();
+          if (sessionIdRef.current !== runId) return;
+          announce('error', reason);
+          finishSession('error');
         } else {
           console.error('[Voice] Failed:', msg);
           cancelRecording();
@@ -385,8 +417,10 @@ export default function RecordingOverlay() {
           finishSession('error');
         }
       } finally {
-        processingRef.current = false;
-        abortRef.current = null;
+        if (sessionIdRef.current === runId) {
+          processingRef.current = false;
+          abortRef.current = null;
+        }
       }
     };
 
@@ -437,6 +471,16 @@ export default function RecordingOverlay() {
       targetPosRef.current = payload.targetPos ?? null;
       processingRef.current = false;
       cancelledRef.current = false;
+      captureLiveRef.current = false;
+      pendingStopRef.current = false;
+      // This run is over once cancelled OR once a newer session replaced it. The shared refs
+      // alone cannot say which run they describe: cancel + an immediate re-press resets them
+      // before this run's microphone request has even returned.
+      const mySession = payload.sessionId;
+      const gone = () => cancelledRef.current || finishedRef.current || sessionIdRef.current !== mySession;
+      // Play the start chime BEFORE muting: afplay goes through the system output, so a chime
+      // started after the mute was never heard.
+      if (payload.config.voiceSoundEnabled) void invoke('play_sound', { soundType: 'start' }).catch(() => {});
       // NOT 'recording' yet. Muting the system output and opening the microphone measured
       // ~525ms cold on this machine, and announcing "Listening…" up front told the user to
       // start talking during it — which is exactly why the first words went missing.
@@ -470,7 +514,7 @@ export default function RecordingOverlay() {
 
       muteSessionRef.current += 1;
       muteGateRef.current = setSystemMute(true);
-      if (cancelledRef.current || finishedRef.current) { void restoreAudio(); return; }
+      if (gone()) { void restoreAudio(); return; }
       try {
         await startRecording({
           // Re-imposes the invariant the old serial await gave us for free: the speakers are
@@ -479,7 +523,7 @@ export default function RecordingOverlay() {
           // starts, instead of leaving a live mic in a hidden overlay.
           beforeStart: async () => {
             await muteGateRef.current;
-            if (cancelledRef.current || finishedRef.current) throw new Error('cancelled during startup');
+            if (gone()) throw new Error('cancelled during startup');
           },
           autoStop: payload.config.voiceAutoStop, // manual mode (false) -> stop only on re-press
           autoGain: payload.config.micAutoGain,   // AGC boosts quiet mics (fixes "No speech detected")
@@ -490,8 +534,13 @@ export default function RecordingOverlay() {
           onAutoStop: (reason) => {
             if (reason === 'nospeech') {
               cancelRecording();
-              announce('error', 'No speech detected');
-              finishSession('error'); // sets finishedRef -> blocks any late manual process()
+              processingRef.current = true; // block a late manual process() while the status resolves
+              void noSpeechReason().then((why) => {
+                if (sessionIdRef.current !== mySession || finishedRef.current) return; // cancelled meanwhile
+                processingRef.current = false;
+                announce('error', why);
+                finishSession('error');
+              });
             } else if (reason === 'maxed') {
               // Recording-cap hit: a TIMER verdict, not a VAD one. Process like a manual stop —
               // in auto mode the VAD summary is empty here by construction (no long pause ever
@@ -506,13 +555,19 @@ export default function RecordingOverlay() {
         });
         // Cancel may have landed while startRecording() was opening the mic (cancelRecording()
         // was then a no-op because the recorder didn't exist yet). Tear the now-live recorder down.
-        if (cancelledRef.current || finishedRef.current) { cancelRecording(); void restoreAudio(); return; }
+        if (gone()) {
+          // Only tear down a recorder that is still ours; a newer session's must survive.
+          if (sessionIdRef.current === mySession) { cancelRecording(); void restoreAudio(); }
+          return;
+        }
         // Capture is genuinely running now — this is the honest moment to invite speech, and
         // the elapsed timer should count from here rather than from the keypress.
+        captureLiveRef.current = true;
         announce('recording');
         setRecStartedAt(Date.now()); // fresh ticker for THIS session (see the ticker effect below)
-        if (payload.config.voiceSoundEnabled) { try { await invoke('play_sound', { soundType: 'start' }); } catch { /* */ } }
+        if (pendingStopRef.current) { pendingStopRef.current = false; void process(); }
       } catch (err) {
+        if (sessionIdRef.current !== mySession || cancelledRef.current) return; // superseded or cancelled: not an error
         const msg = err instanceof Error ? err.message : String(err);
         console.error('[Voice] Could not start recording:', msg);
         cancelRecording();

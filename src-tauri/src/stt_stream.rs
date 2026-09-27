@@ -34,6 +34,11 @@ struct Session {
     last_emit_at: std::time::Instant,
     /// When this session last saw audio or a lifecycle call. Drives the idle eviction below.
     last_used: std::time::Instant,
+    /// True between a start and its finish/cancel. A push already in flight when the user
+    /// cancelled used to land on the freshly renewed stream and, because renew() backdates
+    /// last_emit_at, emit a provisional transcript right AFTER the is_final clear, bringing
+    /// the abandoned sentence back on screen.
+    accepting: bool,
 }
 
 impl Session {
@@ -154,6 +159,7 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
         if let Some(s) = guard.as_mut() {
             s.renew(); // already warm: nothing to load, the shortcut is ready at once
             s.last_used = std::time::Instant::now();
+            s.accepting = true;
             return Ok(());
         }
     }
@@ -170,8 +176,13 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
 
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = guard.as_mut() {
-        // Two starts raced; the earlier winner is already warm. Renew it and drop ours.
-        s.renew();
+        // Two starts raced; the earlier winner is already warm, so drop ours. Renew only an idle
+        // session: when this load belongs to a run the user cancelled and a newer run is
+        // already streaming into the session, renewing wiped everything it had recognised.
+        if !s.accepting {
+            s.renew();
+            s.accepting = true;
+        }
         return Ok(());
     }
     let stream = recognizer.create_stream();
@@ -181,6 +192,7 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
         last_emitted: String::new(),
         last_emit_at: std::time::Instant::now() - std::time::Duration::from_secs(1),
         last_used: std::time::Instant::now(),
+        accepting: true,
     });
     start_idle_evictor();
     Ok(())
@@ -207,6 +219,9 @@ pub async fn stream_stt_push(
         dlog!("[LiveSTT] push dropped: no session");
         return Ok(());
     };
+    if !s.accepting {
+        return Ok(()); // late chunk from a finished/cancelled run
+    }
 
     // Kept after the outage it exposed: a JS-side bug meant this function was never called at
     // all, and the only reason that was provable — rather than guessable against "the mic is
@@ -271,6 +286,7 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
     if let Some(s) = guard.as_mut() {
         s.renew();
         s.last_used = std::time::Instant::now();
+        s.accepting = false;
     }
     let _ = app.emit(
         "live-transcript",
@@ -284,6 +300,7 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
 pub async fn stream_stt_cancel(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(s) = SESSION.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         s.renew();
+        s.accepting = false;
     }
     // The overlay clears its text only on an is_final event; without one a cancelled
     // session's sentence lingered and flashed up when the window was next shown.

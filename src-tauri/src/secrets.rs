@@ -25,7 +25,10 @@ fn entry(key: &str) -> Result<Entry, String> {
     Entry::new(SERVICE, key).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+// `async`: plain sync commands run on the MAIN thread. A Keychain access prompt (an unsigned
+// update changes the code signature, so macOS asks again) or a slow Secret Service over
+// D-Bus on Linux then froze every window (overlay, popup, tray) until it returned.
+#[tauri::command(async)]
 pub fn secret_set(key: String, value: String) -> Result<(), String> {
     let e = entry(&key)?;
     if value.is_empty() {
@@ -39,7 +42,7 @@ pub fn secret_set(key: String, value: String) -> Result<(), String> {
     e.set_password(&value).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn secret_get(key: String) -> Result<Option<String>, String> {
     match entry(&key)?.get_password() {
         Ok(v) => Ok(Some(v)),
@@ -49,7 +52,7 @@ pub fn secret_get(key: String) -> Result<Option<String>, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn secret_delete(key: String) -> Result<(), String> {
     match entry(&key)?.delete_credential() {
         Ok(()) => Ok(()),

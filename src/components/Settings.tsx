@@ -438,9 +438,14 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     const originalWarn = console.warn;
 
     const addLog = (type: string, ...args: unknown[]) => {
-      const msgContent = args.map(a => 
-        typeof a === 'object' ? JSON.stringify(a) : String(a)
-      ).join(' ');
+      // Never throw from inside console.log: JSON.stringify throws on a circular object, which
+      // turned an ordinary log call into an exception at the caller. Errors stringify to "{}",
+      // so show their message instead.
+      const msgContent = args.map((a) => {
+        if (a instanceof Error) return `${a.name}: ${a.message}`;
+        if (typeof a !== 'object' || a === null) return String(a);
+        try { return JSON.stringify(a); } catch { return Object.prototype.toString.call(a); }
+      }).join(' ');
       
       const time = new Date().toLocaleTimeString('en-US', { hour12: false });
       const msg = `${time} [${type}] ${msgContent}`;

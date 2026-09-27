@@ -98,6 +98,13 @@ let safetyTimer: ReturnType<typeof setTimeout> | null = null;
 // Separate AudioContext that applies the software "boost" gain to the RECORDED path
 // only (raw stream still feeds the VAD/meter untouched). null when boost is off.
 let boostContext: AudioContext | null = null;
+// Bumped by cancelRecording(). A startRecording() still awaiting the microphone when the user
+// cancelled (and maybe started again) must not install its stream over the new run's
+// globals: its tracks would never be stopped and the mic indicator stayed on until quit.
+let startGen = 0;
+class StartCancelled extends Error {
+  constructor() { super('cancelled during startup'); this.name = 'AbortError'; }
+}
 let pcmTap: ScriptProcessorNode | null = null;
 
 
@@ -529,6 +536,7 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Microphone access is not available in this environment');
   }
+  const gen = startGen;
 
   // Single user knob: "boost" applies a real software gain below (default ON).
   // autoGainControl is forced OFF at the constraint level — WKWebView ignores it
@@ -570,6 +578,11 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
       throw new Error('No microphone found. Please connect a microphone.');
     }
     throw new Error(`Could not access microphone: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (gen !== startGen) {
+    stream.getTracks().forEach((t) => t.stop());
+    throw new StartCancelled();
   }
 
   try {
@@ -662,6 +675,7 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
       cleanup();
       throw err;
     }
+    if (gen !== startGen) { cleanup(); throw new StartCancelled(); }
   }
 
   // Timeslice: flush a chunk every 1s. Without it MediaRecorder only emits data on stop(),
@@ -680,9 +694,26 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
     setTimeout(done, 400);
     rec.start(1000);
   });
+  // Cancelled while the recorder was starting: cancelRecording() already tore it down.
+  if (gen !== startGen) throw new StartCancelled();
   console.log(`[Voice] Recording started (mime: ${mediaRecorder.mimeType}, mode: ${opts.autoStop === false ? 'MANUAL' : 'AUTO'}, boost: ${boost ? `${MIC_BOOST_GAIN}x` : 'off'})`);
 
   startVad(stream, opts);
+
+  // The microphone went away mid-recording (unplugged, Bluetooth headset switched off). The
+  // recorder stops on its own and nothing told the overlay, which kept "listening" to a dead
+  // stream. Finish with what was captured so far, like the recording cap does. The short delay
+  // lets the recorder's last dataavailable land first.
+  for (const t of stream.getAudioTracks()) {
+    t.addEventListener('ended', () => {
+      setTimeout(() => {
+        if (mediaRecorder === rec && gen === startGen) {
+          console.warn('[Voice] Microphone track ended, finishing with the audio captured so far');
+          opts.onAutoStop?.('maxed');
+        }
+      }, 300);
+    }, { once: true });
+  }
 
   safetyTimer = setTimeout(() => {
     if (isRecording()) {
@@ -702,18 +733,23 @@ export function stopRecording(): Promise<RecordingResult> {
     const mimeType = recorder.mimeType || 'audio/webm';
     const voicedMs = lastVoicedMs;
     const hadSpeech = lastHadSpeech;
-    recorder.onstop = () => {
+    const finish = () => {
       const blob = new Blob(chunks, { type: mimeType });
       chunks = [];
       cleanup();
       console.log(`[Voice] Recording stopped (${blob.size} bytes, ${mimeType}, voiced ${Math.round(voicedMs)}ms, hadSpeech ${hadSpeech})`);
       resolve({ blob, voicedMs, hadSpeech });
     };
+    // Already stopped (its track ended, or it never started): stop() is a no-op that fires no
+    // 'stop' event, so waiting for one hung the overlay on "Transcribing…" forever.
+    if (recorder.state === 'inactive') { finish(); return; }
+    recorder.onstop = finish;
     try { recorder.stop(); } catch (err) { cleanup(); reject(err instanceof Error ? err : new Error(String(err))); }
   });
 }
 
 export function cancelRecording(): void {
+  startGen++;
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.onstop = null;
     try { mediaRecorder.stop(); } catch { /* */ }

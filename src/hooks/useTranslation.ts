@@ -65,6 +65,14 @@ async function reportFailure(context: 'Translation' | 'Enhance', msg: string): P
       accessibilityPaneOpened = true;
       try { await invoke('open_accessibility_settings'); } catch { /* */ }
     }
+  } else if (/daily free quota/i.test(msg)) {
+    title = 'Daily Free Limit Reached';
+    body = msg.substring(0, 200);
+    hint = 'Daily limit reached';
+  } else if (/server busy|too many requests/i.test(msg)) {
+    title = 'Server Busy';
+    body = msg.substring(0, 160);
+    hint = 'Server busy — retry';
   } else if (/server unavailable|unreachable|failed to fetch|load failed|network error|timed? ?out/i.test(msg)) {
     title = 'Server Unreachable';
     body = "The translation server can't be reached. Check your connection, or set your own API key in Settings.";
@@ -142,10 +150,18 @@ function isMacTerminalApp(capturedApp: string): boolean {
 // (it just types at the cursor → duplicated text), so replace mode auto-routes to the terminal
 // strategy (clear the input line, then paste). The dedicated terminal shortcut stays as a manual
 // override for terminals this list doesn't recognize.
-function isTerminalApp(capturedApp: string): boolean {
+// Windows asks Rust, which classifies the captured window by its process image; the title is
+// only a fallback if that call fails. Titles are set by whatever runs inside the window, so
+// matching "cmd" there sent an editor showing cmd.go down the terminal path, which erases the
+// end of the line before pasting.
+async function isTerminalApp(capturedApp: string): Promise<boolean> {
   if (IS_MAC) return isMacTerminalApp(capturedApp);
-  const appLower = capturedApp.toLowerCase();
-  return TERMINAL_PATTERNS.some(pattern => appLower.includes(pattern));
+  try {
+    return await invoke<boolean>('target_is_terminal');
+  } catch {
+    const appLower = capturedApp.toLowerCase();
+    return TERMINAL_PATTERNS.some(pattern => appLower.includes(pattern));
+  }
 }
 
 // Terminal paste-injection guard. The text we paste is an LLM translation of arbitrary
@@ -297,7 +313,7 @@ export function useTranslation() {
       console.error('[Test] API Key failed:', msg);
       return { success: false, error: msg };
     }
-  }, [apiKey, provider, model, hasValidKey]);
+  }, [apiKey, provider, model, customBaseURL, customModel, hasValidKey]);
 
   // Test Clipboard Read
   const testClipboard = useCallback(async () => {
@@ -389,7 +405,7 @@ export function useTranslation() {
     } finally {
       setTranslating(false);
     }
-  }, [apiKey, provider, model, sourceLang, targetLang, isTranslating, hasValidKey, readClipboard, writeClipboard, setTranslating, setTranslationStatus, setTranslation, setError, reset]);
+  }, [apiKey, provider, model, customBaseURL, customModel, sourceLang, targetLang, isTranslating, hasValidKey, readClipboard, writeClipboard, setTranslating, setTranslationStatus, setTranslation, setError, reset]);
 
   // Full translate with simulate copy/paste
   // forcePopup: if true, show popup instead of replacing text
@@ -485,7 +501,7 @@ export function useTranslation() {
       
       // Terminal detection - ONLY for replace mode, NOT for popup mode
       // Popup mode just needs to copy text, no special terminal handling needed
-      const isTerminal_detected = (effectiveMode === 'replace') ? isTerminalApp(capturedApp) : false;
+      const isTerminal_detected = (effectiveMode === 'replace') ? await isTerminalApp(capturedApp) : false;
       
       if (effectiveMode === 'replace' && capturedApp && !isTerminal_detected) {
         if (appDetection.type === 'non_replaceable') {
@@ -494,7 +510,9 @@ export function useTranslation() {
           console.warn(`⚠️ [Translate] Reason: ${appDetection.reason}`);
           await notify('Replace Mode Not Supported', appDetection.reason);
           console.log('[Translate] Switching to Popup mode...');
-          return translate(true, false); // forcePopup = true
+          // await: a bare return let this call's finally run immediately and clear the abort
+          // controller the popup run had just installed, so Esc/Cancel stopped working.
+          return await translate(true, false); // forcePopup = true
         }
         // For browsers (readonly or editable), try replace with verification fallback
         if (isBrowser) {
@@ -850,7 +868,7 @@ export function useTranslation() {
         setTranslating(false);
       }
     }
-  }, [apiKey, provider, model, sourceLang, targetLang, isTranslating, hasValidKey, isServerProvider, soundEnabled, loadingEnabled, simulateCopy, simulatePaste, readClipboard, writeClipboard, setTranslating, setEnhancing, setTranslationStatus, setTranslation, setError, reset, setAbortController]);
+  }, [apiKey, provider, model, customBaseURL, customModel, sourceLang, targetLang, isTranslating, hasValidKey, isServerProvider, soundEnabled, loadingEnabled, simulateCopy, simulatePaste, readClipboard, writeClipboard, setTranslating, setEnhancing, setTranslationStatus, setTranslation, setError, reset, setAbortController]);
 
   // Translate with popup - always shows popup regardless of mode setting
   const translatePopup = useCallback(async () => {
@@ -954,7 +972,7 @@ export function useTranslation() {
       }
       
       // Detect if target is a terminal app - use terminal methods even for replace/popup mode
-      const isTerminal_detected = isTerminalApp(capturedApp);
+      const isTerminal_detected = await isTerminalApp(capturedApp);
       
       // Detect app type for smart handling
       const appDetection = capturedApp ? detectAppType(capturedApp) : { type: 'replaceable' as AppType, reason: '' };
@@ -969,7 +987,7 @@ export function useTranslation() {
           // Only force popup for truly non-replaceable apps (PDF, image viewers)
           console.warn(`⚠️ [Enhance] Non-replaceable app detected: ${capturedApp}`);
           await notify('Replace Mode Not Supported', appDetection.reason);
-          return enhance(true, false); // forcePopup = true
+          return await enhance(true, false); // forcePopup = true (await: see translate)
         }
         // For browsers (readonly or editable), try replace with verification fallback
         if (isBrowser_enhance) {
@@ -1295,7 +1313,7 @@ export function useTranslation() {
       
       // Note: setTranslating(false) is handled by reset() after success/error
     }
-  }, [apiKey, provider, model, targetLang, isTranslating, hasValidKey, isServerProvider, soundEnabled, loadingEnabled, simulateCopy, simulatePaste, readClipboard, writeClipboard, setTranslating, setEnhancing, setTranslationStatus, setTranslation, setError, reset, setAbortController]);
+  }, [apiKey, provider, model, customBaseURL, customModel, targetLang, isTranslating, hasValidKey, isServerProvider, soundEnabled, loadingEnabled, simulateCopy, simulatePaste, readClipboard, writeClipboard, setTranslating, setEnhancing, setTranslationStatus, setTranslation, setError, reset, setAbortController]);
 
   // Enhance with popup - shows popup instead of replacing text
   const enhancePopup = useCallback(async () => {

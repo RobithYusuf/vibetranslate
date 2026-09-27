@@ -102,6 +102,7 @@ fn main() {
             keyboard::simulate_terminal_replace,
             keyboard::get_terminal_selection,
             keyboard::debug_terminal_info,
+            keyboard::target_is_terminal,
             mac_rounded_corners::enable_rounded_corners,
             mac_rounded_corners::enable_modern_window_style,
             mac_rounded_corners::reposition_traffic_lights,

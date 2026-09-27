@@ -124,10 +124,21 @@ export function assertSafeBaseURL(url: string): void {
 function createClient(apiKey: string, provider: AIProvider, baseURL?: string): OpenAI {
   if (baseURL) assertSafeBaseURL(baseURL); // block key exfil / SSRF via a malicious custom endpoint
   const config = AI_PROVIDERS[provider];
+  // A custom provider with no endpoint must fail here. An empty baseURL falls through to the
+  // SDK's own default, api.openai.com, so the user's custom-provider key was sent to OpenAI
+  // (popup re-translate, the Settings key test, or a translate right after clearing the URL).
+  if (provider === 'custom' && !baseURL) {
+    throw new Error('Custom provider needs a base URL. Set it in Settings.');
+  }
   return new OpenAI({
     apiKey,
     baseURL: baseURL || config.baseURL,
     dangerouslyAllowBrowser: true,
+    // The SDK default is 10 minutes with 2 retries. A stalled provider then held
+    // isTranslating for up to half an hour, blocking every shortcut, and with the loading
+    // overlay turned off there was no Cancel button.
+    timeout: 30_000,
+    maxRetries: 1,
     // Custom endpoints often lack CORS headers -> route them through Tauri's HTTP client
     // (no CORS). Standard providers keep the default (browser) fetch which already works.
     fetch: baseURL ? (tauriFetch as unknown as typeof fetch) : undefined,
@@ -176,6 +187,8 @@ async function tryServerTranslate(
   model?: string,
   signal?: AbortSignal
 ): Promise<TranslateResult | null> {
+  // Thrown after the try block: its catch turns every error into "fall back".
+  let limitError: Error | null = null;
   try {
     const response = await fetch(`${APP_CONFIG.API_URL}/api/translate`, {
       method: 'POST',
@@ -184,9 +197,21 @@ async function tryServerTranslate(
       // office behind one NAT into a single allowance.
       headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() },
       body: JSON.stringify({ text, sourceLang, targetLang, enhance, model }),
-      signal,
+      // No timeout of its own before: a stalled connection (captive portal, Wi-Fi hand-off)
+      // kept the translation "running" until the OS gave up, often minutes later.
+      signal: withTimeout(signal, 30_000),
     });
-    
+
+    // Rate limits are an answer, not an outage. Reporting the daily quota as "server
+    // unreachable, check your connection" sent users debugging a network that was fine.
+    if (response.status === 429) {
+      const body = await response.json().catch(() => ({})) as { quotaExceeded?: boolean; hint?: string };
+      limitError = body.quotaExceeded
+        ? new Error(`Daily free quota reached. ${body.hint || 'Try again tomorrow, or add your own API key in Settings.'}`)
+        : new Error('Server busy (too many requests). Try again in a moment.');
+      return null;
+    }
+
     if (!response.ok) {
       // Server disabled or error - return null to fallback
       console.log('[Server] Unavailable — using the configured provider key');
@@ -203,7 +228,21 @@ async function tryServerTranslate(
     // Network error or server down - fallback silently
     console.log('[Server] Error, falling back:', err instanceof Error ? err.message : err);
     return null;
+  } finally {
+    if (limitError) throw limitError;
   }
+}
+
+// The caller's cancel signal plus a hard timeout. AbortSignal.any is too new for older macOS
+// WebKit, so combine them by hand.
+function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')), ms);
+  const onAbort = () => { clearTimeout(timer); ctrl.abort(signal?.reason); };
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  ctrl.signal.addEventListener('abort', () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }, { once: true });
+  return ctrl.signal;
 }
 
 export async function translateText(

@@ -91,9 +91,7 @@ export const AI_PROVIDERS: Record<AIProvider, {
     models: [
       { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B (free)', free: true },
       { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B (free)', free: true },
-      { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B (free)', free: true },
       { id: 'openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (free)', free: true },
-      { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B (free)', free: true },
     ],
     keyPrefix: 'sk-or-',
     keyPlaceholder: 'sk-or-...',

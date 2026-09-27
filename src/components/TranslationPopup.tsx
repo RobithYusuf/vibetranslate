@@ -6,6 +6,9 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { LANGUAGES, LANGUAGE_MAP } from '@/utils/constants';
 import { translateText } from '@/services/openai';
 import { useAppStore } from '@/stores/appStore';
+import { loadSettings } from '@/services/storage';
+import { loadAllApiKeys } from '@/services/secrets';
+import type { AIProvider } from '@/types';
 
 interface TranslationData {
   original: string;
@@ -25,6 +28,7 @@ export default function TranslationPopup() {
   const [isLoading, setIsLoading] = useState(true);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const retranslateIdRef = useRef(0); // bumped per re-translate AND per incoming result
 
   // Get store values for API calls
   const { apiKeys, provider, model } = useAppStore();
@@ -38,6 +42,8 @@ export default function TranslationPopup() {
 
     const unlisten = listen<TranslationData>('translation-result', (event) => {
       console.log('[Popup] Received translation:', event.payload);
+      retranslateIdRef.current++; // a re-translate still in flight must not overwrite this
+      setIsRetranslating(false);
       setTranslation(event.payload);
       setSelectedTargetLang(event.payload.targetLang);
       setCopied(false);
@@ -101,16 +107,31 @@ export default function TranslationPopup() {
     // Need to re-translate
     setIsRetranslating(true);
     console.log('[Popup] Re-translating to', newLang);
+    const requestId = ++retranslateIdRef.current;
 
     try {
+      // This window is created once and reused, so its store holds the settings from whenever
+      // it was first opened. Read the CURRENT provider, key and model: a provider switched
+      // since then was ignored. Also resolve 'auto' and pass the custom endpoint the way the
+      // main flow does; the raw 'auto' model made every bring-your-own-key re-translate fail.
+      const saved = (await loadSettings().catch(() => null)) as
+        | { provider?: AIProvider; model?: string; customBaseURL?: string; customModel?: string }
+        | null;
+      const keys = await loadAllApiKeys().catch(() => ({} as Record<string, string | null>));
+      const prov = saved?.provider ?? provider;
+      const isCustom = prov === 'custom';
+      const chosenModel = isCustom ? saved?.customModel : (saved?.model ?? model);
       const result = await translateText({
         text: translation.original,
         sourceLang: translation.sourceLang,
         targetLang: newLang,
-        apiKey: apiKey || '',
-        provider,
-        model,
+        apiKey: keys[prov] || (prov === provider ? apiKey : '') || '',
+        provider: prov,
+        model: chosenModel && chosenModel !== 'auto' ? chosenModel : undefined,
+        baseURL: isCustom ? saved?.customBaseURL : undefined,
       });
+      // A newer translation (or another language pick) arrived while this one was in flight.
+      if (requestId !== retranslateIdRef.current) return;
 
       // Cache the result
       translationCache.set(cacheKey, result.translatedText);
@@ -123,9 +144,9 @@ export default function TranslationPopup() {
     } catch (err) {
       console.error('[Popup] Re-translate failed:', err);
       // Revert to previous language
-      setSelectedTargetLang(translation.targetLang);
+      if (requestId === retranslateIdRef.current) setSelectedTargetLang(translation.targetLang);
     } finally {
-      setIsRetranslating(false);
+      if (requestId === retranslateIdRef.current) setIsRetranslating(false);
     }
   }, [translation, selectedTargetLang, apiKey, provider, model]);
 

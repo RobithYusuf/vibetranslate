@@ -12,8 +12,10 @@ export async function getTargetApp(): Promise<string> {
 // live=true (translate): query the real frontmost app now (~150ms osascript on macOS) so a Cmd-Tab
 // right before the shortcut is respected. live=false (voice): use the instant tracker cache so it
 // stays off the critical path to opening the mic.
-export async function captureForegroundHwnd(live = true): Promise<string> {
-  return await invoke('capture_foreground_hwnd', { live });
+// longPin: keep the target pinned for the longest operation (a voice dictation can run 15
+// minutes); a translate only needs the short pin.
+export async function captureForegroundHwnd(live = true, longPin = false): Promise<string> {
+  return await invoke('capture_foreground_hwnd', { live, longPin });
 }
 
 // Atomic capture + copy - captures HWND and sends Ctrl+C in one operation

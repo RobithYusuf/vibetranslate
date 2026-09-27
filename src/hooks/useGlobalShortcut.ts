@@ -4,6 +4,7 @@ import {
   unregister,
   isRegistered,
 } from '@tauri-apps/plugin-global-shortcut';
+import { encodeMouseShortcut } from '@/utils/mouseShortcut';
 
 interface UseGlobalShortcutOptions {
   shortcut: string;
@@ -18,6 +19,8 @@ const isFunctionKey = (s: string) => /^F([1-9]|1[0-9]|2[0-4])$/i.test(s.trim());
 // Validate shortcut format
 function isValidShortcut(shortcut: string): boolean {
   if (!shortcut) return false;
+  // Mouse shortcuts belong to the native mouse hook, never to the keyboard plugin.
+  if (encodeMouseShortcut(shortcut) !== null) return false;
   const invalidChars = /[´`~§±]/;
   if (invalidChars.test(shortcut)) return false;
   const parts = shortcut.split('+');
@@ -72,8 +75,16 @@ export function useGlobalShortcut({
       return;
     }
 
-    // Skip if invalid shortcut
+    // Not a keyboard shortcut (a mouse binding, or invalid). Release the keyboard combo this
+    // hook held before: rebinding an action to a mouse button used to leave the old key combo
+    // registered, still firing the action and still blocked for every other app.
     if (!isValidShortcut(shortcut)) {
+      const prev = lastShortcutRef.current;
+      if (prev) {
+        lastShortcutRef.current = null;
+        globalRegistry.delete(prev);
+        void unregister(prev).catch(() => {});
+      }
       setIsActive(false);
       return;
     }

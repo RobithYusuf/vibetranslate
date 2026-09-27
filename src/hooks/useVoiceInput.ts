@@ -123,7 +123,7 @@ export function useVoiceInput() {
     // (live=false, ~120ms faster) pasted into the previous window on the previous monitor
     // when the user switched and immediately fired voice — the user starts speaking only
     // after the overlay shows, so the round-trip is imperceptible.
-    try { targetApp = await captureForegroundHwnd(true); } catch (e) { console.warn('[Voice] capture foreground:', e); }
+    try { targetApp = await captureForegroundHwnd(true, true); } catch (e) { console.warn('[Voice] capture foreground:', e); }
     // Snapshot the captured window's position NOW: the recording can run for minutes, and a
     // translate fired meanwhile overwrites the live slot — the paste must still hit the
     // window the user STARTED in.
@@ -168,8 +168,6 @@ export function useVoiceInput() {
     reEmitRef.current = setTimeout(() => { reEmitRef.current = null; void emitTo('recording', 'voice-start', payload); }, 250);
   }, [setIsRecording]);
 
-  const voiceTranslate = useCallback(() => toggleVoice('translate'), [toggleVoice]);
-  const voiceOriginal = useCallback(() => toggleVoice('original'), [toggleVoice]);
 
   // Push-to-talk uses the same start/stop events as tap mode. The small in-flight
   // guard handles a very quick press-and-release before show_recording resolves.
@@ -186,6 +184,18 @@ export function useVoiceInput() {
       }
     }
   }, [toggleVoice]);
+
+  // Tap mode. The start sequence awaits several round-trips (capture target, show overlay)
+  // before isRecording flips, often 200-400ms. A second press in that gap read isRecording as
+  // false and began a second start the overlay ignored, so the user's "stop" was lost and the
+  // recording kept running. A press during the start now queues the stop instead.
+  const pressVoice = useCallback((mode: VoiceMode) => {
+    if (startingRef.current) { stopAfterStartRef.current = true; return Promise.resolve(); }
+    if (useAppStore.getState().isRecording) return toggleVoice(mode);
+    return startVoice(mode);
+  }, [toggleVoice, startVoice]);
+  const voiceTranslate = useCallback(() => pressVoice('translate'), [pressVoice]);
+  const voiceOriginal = useCallback(() => pressVoice('original'), [pressVoice]);
 
   const stopVoice = useCallback(() => {
     if (startingRef.current) {

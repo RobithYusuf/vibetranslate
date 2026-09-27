@@ -5,11 +5,17 @@ import { loadAllApiKeys, saveAllApiKeys, migratePlaintextKeys } from '@/services
 import { Settings, AIProvider, LicenseStatus } from '@/types';
 import { Language } from '@/i18n';
 import { sanitizeCorrections } from '@/utils/voiceCorrections';
+import { isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
+import { encodeMouseShortcut } from '@/utils/mouseShortcut';
 import { DEFAULT_SHORTCUT, DEFAULT_POPUP_SHORTCUT, DEFAULT_TERMINAL_SHORTCUT, DEFAULT_VOICE_SHORTCUT, DEFAULT_VOICE_ORIGINAL_SHORTCUT } from '@/utils/constants';
 
 // Validate shortcut format - modifier + key, OR a single function key (F1–F24).
+// Mouse shortcuts ("Mouse3", "Hold3+Mouse0", "Alt+Mouse4") are valid too. A plain "Mouse3" is a
+// single part, so the keyboard rule below rejected it and every launch silently reset the
+// binding the user had just recorded back to the default.
 function isValidShortcut(shortcut: string): boolean {
   if (!shortcut) return false;
+  if (encodeMouseShortcut(shortcut) !== null) return true;
   const parts = shortcut.split('+').map(p => p.trim());
   const isFunctionKey = /^F([1-9]|1[0-9]|2[0-4])$/i.test(shortcut.trim());
   if (parts.length < 2) return isFunctionKey;
@@ -21,6 +27,11 @@ function isValidShortcut(shortcut: string): boolean {
   // Last part should NOT be a modifier (it should be the actual key)
   return !modifiers.includes(lastPart);
 }
+
+// App (every window) and Settings (main window) both call this hook, so the load ran twice in
+// the main window: double keychain reads and migration, and the second pass could land after
+// Settings had synced autostart from the OS, putting the stale file value back. Once per window.
+let loadStarted = false;
 
 export function useSettings() {
   const {
@@ -101,6 +112,8 @@ export function useSettings() {
   } = useAppStore();
 
   useEffect(() => {
+    if (loadStarted) return;
+    loadStarted = true;
     const load = async () => {
       console.log('[Settings] Loading settings from storage...');
       try {
@@ -192,7 +205,13 @@ export function useSettings() {
           }
           if (settings.sourceLang) setSourceLang(settings.sourceLang);
           if (settings.targetLang) setTargetLang(settings.targetLang);
-          if (settings.autoStart !== undefined) setAutoStart(settings.autoStart);
+          // The OS login item is the source of truth (the user can remove it in System Settings);
+          // the file value is only a fallback when the OS cannot be asked.
+          try {
+            setAutoStart(await isAutostartEnabled());
+          } catch {
+            if (settings.autoStart !== undefined) setAutoStart(settings.autoStart);
+          }
           if (settings.enhanceEnabled !== undefined) setEnhanceEnabled(settings.enhanceEnabled);
           if (settings.enhanceShortcut) setEnhanceShortcut(settings.enhanceShortcut);
           // Voice-to-Text settings

@@ -198,7 +198,15 @@ pub async fn download_stt_model(app: tauri::AppHandle, model_id: String) -> Resu
     let result: Result<(), String> = async {
         let dir = model_dir(&app, spec.id)?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let client = reqwest::Client::new();
+        // Timeouts per connect and per read (not total: a 675MB file on a slow line legitimately
+        // takes a long time). With none, a connection that stalled mid-file (sleep/wake, Wi-Fi
+        // change) waited forever, DOWNLOADING stayed set, and every retry answered "download
+        // sudah berjalan" until the app was restarted.
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(20))
+            .read_timeout(std::time::Duration::from_secs(45))
+            .build()
+            .map_err(|e| e.to_string())?;
         // grand-total progress across all files, so multi-file models (Parakeet) show ONE bar
         let grand_total: u64 = spec.files.iter().map(|f| f.size_hint).sum();
         let mut grand_received: u64 = 0;
@@ -339,6 +347,7 @@ pub async fn transcribe_local(
         },
     };
 
+    let is_whisper = matches!(spec.kind, ModelKind::Whisper);
     // sherpa's FFI pointers aren't Send — run on a blocking thread.
     tauri::async_runtime::spawn_blocking(move || {
         let config = OfflineRecognizerConfig {
@@ -347,11 +356,85 @@ pub async fn transcribe_local(
         };
         let rec = OfflineRecognizer::create(&config)
             .ok_or_else(|| "gagal memuat model offline".to_string())?;
-        let stream = rec.create_stream();
-        stream.accept_waveform(sample_rate as i32, &samples);
-        rec.decode(&stream);
-        Ok(stream.get_result().map(|r| r.text).unwrap_or_default())
+        // Whisper decodes at most ~30s per call: sherpa keeps the first 30 seconds and drops the
+        // rest with only a log line, so a 45s dictation silently lost its last 15s. Decode it in
+        // pieces, cut at pauses. The other engines take the whole clip in one pass.
+        let pieces: Vec<&[f32]> = if is_whisper {
+            split_at_pauses(&samples, sample_rate as usize, WHISPER_MAX_SECS)
+        } else {
+            vec![&samples[..]]
+        };
+        let mut parts: Vec<String> = Vec::with_capacity(pieces.len());
+        for piece in pieces {
+            let stream = rec.create_stream();
+            stream.accept_waveform(sample_rate as i32, piece);
+            rec.decode(&stream);
+            let text = stream.get_result().map(|r| r.text).unwrap_or_default();
+            let text = text.trim();
+            if !text.is_empty() {
+                parts.push(text.to_string());
+            }
+        }
+        Ok(parts.join(" "))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+
+/// Longest piece handed to Whisper in one decode, leaving margin under its 30s window.
+const WHISPER_MAX_SECS: usize = 28;
+
+/// Split audio into pieces of at most `max_secs`, each cut at the quietest 30ms inside the last
+/// 5 seconds of its window so a cut lands in a pause rather than through a word.
+fn split_at_pauses(samples: &[f32], rate: usize, max_secs: usize) -> Vec<&[f32]> {
+    let rate = rate.max(1);
+    let max_len = max_secs * rate;
+    let search = (5 * rate).min(max_len / 2);
+    let frame = (rate * 30 / 1000).max(1);
+    let mut out = Vec::new();
+    let mut start = 0;
+    while samples.len() - start > max_len {
+        let window_end = start + max_len;
+        let mut best_cut = window_end;
+        let mut best_energy = f32::MAX;
+        let mut pos = window_end - search;
+        while pos + frame <= window_end {
+            let energy: f32 = samples[pos..pos + frame].iter().map(|v| v * v).sum();
+            if energy < best_energy {
+                best_energy = energy;
+                best_cut = pos + frame / 2;
+            }
+            pos += frame;
+        }
+        out.push(&samples[start..best_cut]);
+        start = best_cut;
+    }
+    out.push(&samples[start..]);
+    out
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::split_at_pauses;
+
+    #[test]
+    fn short_audio_is_one_piece() {
+        let a = vec![0.1f32; 16000 * 10];
+        assert_eq!(split_at_pauses(&a, 16000, 28).len(), 1);
+    }
+
+    #[test]
+    fn long_audio_is_cut_at_the_pause_and_nothing_is_lost() {
+        // 70s of "speech" with a silent gap at 26-27s and at 52-53s.
+        let rate = 16000;
+        let mut a = vec![0.5f32; rate * 70];
+        for v in &mut a[rate * 26..rate * 27] { *v = 0.0; }
+        for v in &mut a[rate * 52..rate * 53] { *v = 0.0; }
+        let pieces = split_at_pauses(&a, rate, 28);
+        assert_eq!(pieces.iter().map(|p| p.len()).sum::<usize>(), a.len());
+        assert!(pieces.iter().all(|p| p.len() <= rate * 28));
+        let first_cut = pieces[0].len();
+        assert!(first_cut >= rate * 26 && first_cut <= rate * 27, "cut at {first_cut}");
+    }
 }
