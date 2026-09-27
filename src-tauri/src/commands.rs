@@ -504,6 +504,68 @@ fn order_back_other_windows(app: &AppHandle, keep: &'static str) {
     });
 }
 
+// Show the overlay on the Space the user is on, THEN activate the app. Everything runs on the
+// main thread, in this order, and the caller waits for it to finish.
+//
+// Why the order matters: with "switch to a Space with open windows for the application" (the
+// macOS default), activating the app while its frontmost window sits on another desktop makes
+// macOS jump to that desktop. With Settings left open on Desktop 2, pressing the voice
+// shortcut on Desktop 3 took the user to Desktop 2, and the overlay never showed where they
+// were working. The old code called `activateIgnoringOtherApps:` straight from the command
+// thread, while `show()` had only been QUEUED for the main thread. So activation won the race
+// and the Settings window was still the app's frontmost window when macOS picked a Space.
+//
+// This version queues behind that `show()`, pushes our other windows to the back, and orders
+// the all-Spaces overlay front and key. Only then does it activate, so the app's frontmost
+// window is already on the current desktop and macOS has no reason to switch.
+#[cfg(target_os = "macos")]
+fn present_overlay_on_active_space(app: &AppHandle, keep: &'static str) {
+    // Collect the raw NSWindow pointers here: tauri getters called from inside the main-thread
+    // closure would block waiting on the main thread itself.
+    let mut overlay: Option<usize> = None;
+    let mut others: Vec<usize> = Vec::new();
+    for (label, w) in app.webview_windows() {
+        if let Ok(ptr) = w.ns_window() {
+            if label == keep {
+                overlay = Some(ptr as usize);
+            } else {
+                others.push(ptr as usize);
+            }
+        }
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let _ = app.run_on_main_thread(move || {
+        use cocoa::base::{id, nil, BOOL, YES};
+        use objc::{class, msg_send, sel, sel_impl};
+        unsafe {
+            for ptr in &others {
+                let ns = *ptr as id;
+                let visible: BOOL = msg_send![ns, isVisible];
+                if visible == YES {
+                    let _: () = msg_send![ns, orderBack: nil];
+                }
+            }
+            if let Some(ptr) = overlay {
+                let ns = ptr as id;
+                let _: () = msg_send![ns, setLevel: 25i64];
+                let behavior: u64 = (1 << 0) | (1 << 4) | (1 << 8); // allSpaces|stationary|fsAux
+                let _: () = msg_send![ns, setCollectionBehavior: behavior];
+                let _: () = msg_send![ns, orderFrontRegardless];
+                let _: () = msg_send![ns, makeKeyWindow];
+            }
+            let ns_app: id = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
+            // Activation may hand key status back to the app's previous main window.
+            if let Some(ptr) = overlay {
+                let _: () = msg_send![ptr as id, makeKeyAndOrderFront: nil];
+            }
+        }
+        let _ = tx.send(());
+    });
+    // Bounded: a wedged main thread must not hang the voice start forever.
+    let _ = rx.recv_timeout(std::time::Duration::from_millis(500));
+}
+
 // Build the recording overlay once (hidden). Pre-created at startup so it is
 // already rendered and its event listeners are ready by the time it's shown.
 pub fn ensure_recording_window(app: &AppHandle) {
@@ -681,9 +743,9 @@ pub async fn show_recording(app: AppHandle, position: Option<String>) -> Result<
         // silent for a background app), then focus the overlay so ✓/✗ + Esc work.
         #[cfg(target_os = "macos")]
         {
-            activate_app();
-            // Undo the collateral damage of activation before the user can see it.
-            order_back_other_windows(&app, "recording");
+            // Activate only after the overlay is on screen on THIS desktop. Otherwise macOS
+            // switches to the desktop that holds the Settings window. See the function above.
+            present_overlay_on_active_space(&app, "recording");
         }
         let _ = window.set_focus();
         #[cfg(target_os = "macos")]

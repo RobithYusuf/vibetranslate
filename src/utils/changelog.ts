@@ -10,6 +10,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.50',
+    date: '2026-09-27',
+    changes: [
+      'Fixes voice input on macOS with multiple desktops (Spaces): the listening overlay now appears on the desktop you are working on, instead of jumping to the desktop where the Settings window is open',
+    ],
+  },
+  {
     version: '1.0.49',
     date: '2026-09-05',
     changes: [
