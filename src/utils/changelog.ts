@@ -10,6 +10,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.52',
+    date: '2026-09-27',
+    changes: [
+      'macOS: Accessibility and Microphone permissions now stay granted after updates. After THIS update, turn them on one last time in System Settings; future updates keep them',
+      'Settings shows permission changes the moment you flip them in System Settings, without closing the window',
+      'Voice transcription stays fast on unstable networks: the connection opens while you speak, and a stalled request is retried on a fresh connection automatically',
+      'Built on Tauri 2.12 with updated plugins',
+    ],
+  },
+  {
     version: '1.0.51',
     date: '2026-09-27',
     changes: [

@@ -122,8 +122,10 @@ Get it from [vibetranslate.id/download](https://vibetranslate.id/download) or [R
   Wayland compositors may restrict them. Use an X11 session if those operations are blocked.
   Extra mouse-button shortcuts are currently supported on macOS and Windows, not Linux.
 
-The installers are **not code-signed or notarized** (an Apple Developer account is $99/year
-and Windows certificates are a recurring cost). So the first launch needs one extra step:
+The installers are **not notarized** (an Apple Developer account is $99/year) and the Windows
+builds are not code-signed (certificates are a recurring cost). macOS builds carry a stable
+self-signed signature, which is why Accessibility and Microphone permissions survive updates, but
+Gatekeeper does not know that certificate. So the first launch needs one extra step:
 
 - **macOS** — open the app once and let it be blocked, then go to **System Settings → Privacy
   & Security**, scroll to **Security**, and click **Open Anyway**. Control-clicking the app no

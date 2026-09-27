@@ -8,7 +8,7 @@ import { startRecording, stopRecording, cancelRecording } from '@/services/audio
 import { onLiveTranscript } from '@/services/sttStream';
 import { LiveSession } from '@/services/liveSession';
 import { humanizeTranscript } from '@/utils/humanizeTranscript';
-import { transcribe } from '@/services/transcription';
+import { transcribe, prewarmTranscription } from '@/services/transcription';
 import { translateText } from '@/services/openai';
 import { setClipboardText } from '@/services/clipboard';
 import { simulatePasteToApp } from '@/services/keyboard';
@@ -489,6 +489,12 @@ export default function RecordingOverlay() {
       // Start the mute WITHOUT awaiting it and open the microphone at the same time. The mute
       // only has to be finished before the first captured chunk, not before the mic opens, so
       // serialising the two was ~233ms of pure latency. beforeStart below re-imposes the order.
+      // Warm the connection to the transcription server now, while the user speaks, so the
+      // request at the end skips the TLS handshake (the step measured stalling on flaky
+      // networks). Offline engines never contact it.
+      if (!['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(payload.config.voiceSttEngine)) {
+        prewarmTranscription();
+      }
       // Live dictation. All the startup/queueing subtleties live in LiveSession — see the
       // header comment there before changing the ordering here.
       const wantLive = !!payload.config.voiceLiveMode;

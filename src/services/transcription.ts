@@ -63,6 +63,75 @@ function fileExtensionFor(mime: string): string {
   return 'webm';
 }
 
+// Send the same request again on a FRESH connection when the first is slow, and take whichever
+// answers first. Measured from a real user's Mac (2026-09-27): the server answers an 18s clip
+// in ~0.6s, yet 2-3 in 10 requests took 5-22s, and static pages on the same network showed the
+// same stalls, so it is a connection that hangs (slow TLS, lost packets), not the server. A
+// second connection rarely stalls at the same moment. `make` builds a new request each time
+// (a body is single-use); an early network failure retries at once instead of waiting.
+async function hedgedFetch(
+  make: (signal: AbortSignal) => Promise<Response>,
+  hedgeAfterMs: number,
+  outer?: AbortSignal,
+): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    const ctrls: AbortController[] = [];
+    let settled = false;
+    let running = 0;
+    let hedged = false;
+    let lastErr: unknown = null;
+    const finish = (winner: AbortController | null, fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', onOuterAbort);
+      for (const c of ctrls) if (c !== winner) c.abort(); // the winner's body is still unread
+      fn();
+    };
+    const attempt = () => {
+      const ctrl = new AbortController();
+      ctrls.push(ctrl);
+      running++;
+      make(ctrl.signal).then(
+        (res) => finish(ctrl, () => resolve(res)),
+        (err) => {
+          running--;
+          lastErr = err;
+          if (settled) return;
+          if (!hedged) hedge();
+          else if (running === 0) finish(null, () => reject(lastErr));
+        },
+      );
+    };
+    const hedge = () => {
+      if (hedged || settled) return;
+      hedged = true;
+      attempt();
+    };
+    const onOuterAbort = () => finish(null, () => reject(new DOMException('Aborted', 'AbortError')));
+    if (outer?.aborted) { onOuterAbort(); return; }
+    outer?.addEventListener('abort', onOuterAbort, { once: true });
+    const timer = setTimeout(hedge, hedgeAfterMs);
+    attempt();
+  });
+}
+
+// ~6KB per second of 48kbps Opus. The server answers ~1s per minute of audio, plus its own
+// hedge against a slow model; this waits a little past that before opening a second connection.
+function clientHedgeDelay(blob: Blob): number {
+  return Math.round(3500 + (blob.size / 6000) * 60); // 18s clip ≈ 4.6s, 60s clip ≈ 7.1s
+}
+
+/**
+ * Open the connection to the transcription server while the user is still speaking, so the
+ * request at the end reuses a warm connection instead of paying a TLS handshake, which is the
+ * step measured stalling for seconds on a flaky network. Best-effort and cheap: a GET of the
+ * status route, no audio, no quota.
+ */
+export function prewarmTranscription(): void {
+  void fetch(`${APP_CONFIG.API_URL}/api/transcribe/status`, { cache: 'no-store' }).catch(() => {});
+}
+
 // --- Whisper hallucination defenses (mirror of server/src/routes/transcribe.ts) ---
 interface WhisperSegment { text?: string; no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number }
 
@@ -114,13 +183,17 @@ async function transcribeViaServer(
 
   let response: Response;
   try {
-    response = await fetch(`${APP_CONFIG.API_URL}/api/transcribe`, {
-      method: 'POST',
-      // Same per-install quota id as the translate calls (see utils/deviceId.ts).
-      headers: { 'X-Device-Id': getDeviceId() },
-      body: form,
+    response = await hedgedFetch(
+      (s) => fetch(`${APP_CONFIG.API_URL}/api/transcribe`, {
+        method: 'POST',
+        // Same per-install quota id as the translate calls (see utils/deviceId.ts).
+        headers: { 'X-Device-Id': getDeviceId() },
+        body: form,
+        signal: s,
+      }),
+      clientHedgeDelay(blob),
       signal,
-    });
+    );
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') throw new Error('Transcription cancelled');
     throw new Error(`Could not reach transcription server: ${err instanceof Error ? err.message : String(err)}`);
@@ -178,12 +251,16 @@ async function transcribeDirect(
 
   let response: Response;
   try {
-    response = await fetch(`${cfg.baseURL}/audio/transcriptions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
+    response = await hedgedFetch(
+      (s) => fetch(`${cfg.baseURL}/audio/transcriptions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}` },
+        body: form,
+        signal: s,
+      }),
+      clientHedgeDelay(blob),
       signal,
-    });
+    );
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') throw new Error('Transcription cancelled');
     throw new Error(`Network error contacting ${cfg.provider}: ${err instanceof Error ? err.message : String(err)}`);

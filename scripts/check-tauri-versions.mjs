@@ -44,3 +44,35 @@ if (js !== rs) {
 }
 
 console.log(`tauri crate ${crate[1]} and @tauri-apps/api ${jsRange} agree on ${rs}`);
+
+// Plugins get the same treatment from `tauri build`: tauri-plugin-http 2.8 against
+// @tauri-apps/plugin-http 2.7 stops the release build on every platform. A cargo update can
+// pull a plugin minor that has no npm release yet, and nothing before the release catches it.
+// The installed npm version is what the CLI compares; the range floor is the fallback when
+// node_modules is absent.
+const installed = (name) => {
+  try {
+    return JSON.parse(readFileSync(join(root, 'node_modules', name, 'package.json'), 'utf8')).version;
+  } catch {
+    return null;
+  }
+};
+const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+let bad = 0;
+for (const [name, range] of Object.entries(deps)) {
+  const m = name.match(/^@tauri-apps\/plugin-(.+)$/);
+  if (!m) continue;
+  const crateName = `tauri-plugin-${m[1]}`;
+  const found = lock.match(new RegExp(`\\[\\[package\\]\\]\\nname = "${crateName}"\\nversion = "([^"]+)"`));
+  if (!found) continue; // JS-only plugin package
+  const jsVer = installed(name) ?? range;
+  if (minor(jsVer) !== minor(found[1])) {
+    console.error(
+      `Tauri plugin mismatch: crate ${crateName} ${found[1]} vs ${name} ${jsVer}.\n` +
+        `  cd src-tauri && cargo update -p ${crateName} --precise <${minor(jsVer)}.x>   (or bump ${name})`,
+    );
+    bad++;
+  }
+}
+if (bad) process.exit(1);
+console.log('tauri plugin crates and their npm packages agree');

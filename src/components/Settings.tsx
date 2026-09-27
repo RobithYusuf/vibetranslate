@@ -16,6 +16,7 @@ import { AIProvider } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getVersion } from '@tauri-apps/api/app';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
 import { translateText, fetchModels } from '@/services/openai';
 import APP_CONFIG from '@/config';
@@ -252,16 +253,40 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
   const [perms, setPerms] = useState<{ accessibility: boolean; microphone: string } | null>(null);
   useEffect(() => {
     if (navigator.platform.toUpperCase().indexOf('MAC') < 0) return;
-    const read = () => { void invoke<{ accessibility: boolean; microphone: string }>('permission_status').then(setPerms).catch(() => {}); };
+    let lastAx: boolean | null = null;
+    const read = () => {
+      void invoke<{ accessibility: boolean; microphone: string }>('permission_status')
+        .then((p) => {
+          // Store the new object only when something changed, so an unchanged tick does not
+          // re-render this whole page every 1.5s.
+          setPerms((prev) => (prev && prev.accessibility === p.accessibility && prev.microphone === p.microphone ? prev : p));
+          // Granted just now: bring the mouse-shortcut hook up without waiting for a relaunch.
+          if (lastAx === false && p.accessibility) void invoke('restart_mouse_hook').catch(() => {});
+          lastAx = p.accessibility;
+        })
+        .catch(() => {});
+    };
     read();
-    // Event-driven, NOT polled. Closing this window only hides it (see the CloseRequested
-    // handler in main.rs), so the component never unmounts and a setInterval here would keep
-    // calling into macOS forever behind a window nobody can see. Focus and visibility cover
-    // the only flow that matters: the user leaves for System Settings, grants, comes back.
+    // Polled, but only while this window is actually on screen. Focus alone was not enough:
+    // with System Settings open NEXT to this window, flipping the toggle there never focuses
+    // us, so the card kept saying "Not granted" until the window was closed and reopened.
+    // Closing only hides the window (see the CloseRequested handler in main.rs) and the
+    // component never unmounts, so each tick first asks whether the window is visible and
+    // not minimised; a hidden Settings window costs one cheap IPC call per tick, not a
+    // permission query.
+    const win = getCurrentWindow();
+    const tick = async () => {
+      try {
+        if (!(await win.isVisible()) || (await win.isMinimized())) return;
+      } catch { /* fall through: better a read than a stale card */ }
+      read();
+    };
+    const timer = setInterval(() => { void tick(); }, 1500);
     const onWake = () => { if (document.visibilityState === 'visible') read(); };
     window.addEventListener('focus', onWake);
     document.addEventListener('visibilitychange', onWake);
     return () => {
+      clearInterval(timer);
       window.removeEventListener('focus', onWake);
       document.removeEventListener('visibilitychange', onWake);
     };
