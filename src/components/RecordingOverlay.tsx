@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Loader2, Check, X } from 'lucide-react';
 import { VoiceStatus, VoiceMode } from '@/types';
 import { VOICE_STATUS_MESSAGES, VOICE_BAR_COUNT, MAX_TRANSLATE_CHARS, VOICE_AUTODETECT_FALLBACK_LANG } from '@/utils/constants';
-import { startRecording, stopRecording, cancelRecording, micDeliveredNoSignal } from '@/services/audioRecorder';
+import { startRecording, stopRecording, cancelRecording, micDeliveredNoSignal, micLevelSummary, isVirtualInput } from '@/services/audioRecorder';
 import { onLiveTranscript } from '@/services/sttStream';
 import { LiveSession } from '@/services/liveSession';
 import { LiveEditor } from '@/services/liveEditor';
@@ -63,6 +63,24 @@ function reportVoiceError(msg: string): string {
 // mic then delivers silence, so blaming the user's voice would be wrong far more often than
 // it is right. Used by EVERY no-speech exit: the silent-mic case lands on the VAD and server
 // no-speech paths far more often than on the empty-text one.
+// The input heard almost nothing for several seconds (wrong input device, or input volume at
+// the bottom). Diagnostics AEUG7PST: 5-14 s dictations each held ~1 s of sound, the start
+// chime, and Whisper returned a few garbage characters.
+function micHearsNothing(): boolean {
+  const m = micLevelSummary();
+  return m.heardMs >= 3000 && m.loudMs < 250;
+}
+
+let quietMicWarnedAt = 0;
+function warnQuietMic(): void {
+  if (Date.now() - quietMicWarnedAt < 10 * 60_000) return; // at most once per 10 minutes
+  quietMicWarnedAt = Date.now();
+  void notify(
+    'Your microphone barely hears you',
+    'Check System Settings › Sound › Input: pick your microphone and watch the level move while you speak. You can also choose the microphone in VibeTranslate › Settings › Voice.',
+  );
+}
+
 async function noSpeechReason(): Promise<string> {
   // Exact digital silence: macOS reports the grant as fine but hands us a dead microphone.
   // Seen right after an update changed the app's signature; only re-granting fixes it.
@@ -74,6 +92,11 @@ async function noSpeechReason(): Promise<string> {
     );
     void invoke('open_microphone_settings').catch(() => {});
     return 'Mic permission blocked — re-allow';
+  }
+  if (micHearsNothing()) {
+    diag('voice', 'microphone heard almost nothing (wrong input device or input volume?)');
+    warnQuietMic();
+    return 'Mic hears almost nothing — check input';
   }
   try {
     const p = await invoke<{ microphone: string }>('permission_status');
@@ -285,7 +308,14 @@ export default function RecordingOverlay() {
         const { blob, voicedMs, hadSpeech } = await stopRecording();
         if (sessionIdRef.current !== runId) return;
         const tStt = performance.now();
-        diag('voice', `stop ${auto ? 'auto' : 'manual'} rec=${recStartedAtRef.current ? ((Date.now() - recStartedAtRef.current) / 1000).toFixed(1) : '?'}s audio=${Math.round(blob.size / 1024)}KB voiced=${Math.round(voicedMs)}ms`);
+        const lvl = micLevelSummary();
+        diag('voice', `stop ${auto ? 'auto' : 'manual'} rec=${recStartedAtRef.current ? ((Date.now() - recStartedAtRef.current) / 1000).toFixed(1) : '?'}s audio=${Math.round(blob.size / 1024)}KB voiced=${Math.round(voicedMs)}ms level loud=${lvl.loudMs}ms/${lvl.heardMs}ms peak=${lvl.peak}`);
+        // Even when something gets transcribed, a near-silent input usually means garbage text
+        // from the start chime or the room: tell the user where to look.
+        if (micHearsNothing()) {
+          diag('voice', 'microphone heard almost nothing during this dictation');
+          warnQuietMic();
+        }
         void restoreAudio(); // recording done -> restore audio right away
         // The transcript window's job ended with the recording. Leaving it up while the paste
         // pipeline runs made the whole feature look like it was still listening.
@@ -635,7 +665,19 @@ export default function RecordingOverlay() {
           maxMs: payload.config.voiceMaxMs,       // per-user recording cap from Settings
           silenceMs: payload.config.voiceSilenceMs, // auto-stop pause length from Settings
           deviceId: payload.config.micDeviceId,    // preferred microphone from Settings
-          onDeviceLabel: (label) => { void emit('voice-mic-used', label); },
+          onDeviceLabel: (label) => {
+            void emit('voice-mic-used', label);
+            // Device names only ("MacBook Air Microphone", "BlackHole 2ch"): what the recording
+            // actually listened to is the first thing to know when a voice report comes in.
+            diag('audio', `input: ${label}${isVirtualInput(label) ? ' (virtual/loopback device)' : ''}${payload.config.micDeviceId ? ' (chosen in Settings)' : ' (system default)'}`);
+          },
+          onDeviceFallback: (from, to) => {
+            diag('audio', `system input "${from}" is a loopback device; used "${to}" instead`);
+            void notify(
+              `Using ${to}`,
+              `Your Mac's input is set to "${from}", which records the computer's own sound rather than your voice. VibeTranslate used ${to} instead. To choose permanently: Settings › Voice › Microphone.`,
+            );
+          },
           onAutoStop: (reason) => {
             if (reason === 'nospeech') {
               cancelRecording();

@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.60',
+    date: '2026-10-01',
+    changes: [
+      'Voice: if your Mac\'s input is set to a virtual audio device (BlackHole, Loopback, Zoom...) that records the computer\'s sound instead of your voice, VibeTranslate now uses your real microphone and tells you',
+      'Voice: when the microphone barely hears you, you now get a clear hint to check the input device and volume, instead of odd text or "No speech detected"',
+    ],
+  },
+  {
     version: '1.0.59',
     date: '2026-10-01',
     changes: [

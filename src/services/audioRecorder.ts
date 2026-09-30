@@ -88,6 +88,32 @@ interface StartOptions {
   // Reports the label of the microphone ACTUALLY captured (ground truth from the audio
   // track) — surfaces "which mic is the system default right now" in Settings.
   onDeviceLabel?: (label: string) => void;
+  // The system default input was a virtual/loopback device, so a real microphone was used
+  // instead (see isVirtualInput).
+  onDeviceFallback?: (from: string, to: string) => void;
+}
+
+// Inputs that capture what the Mac PLAYS, not what the user says: loopback drivers installed
+// by screen recorders and meeting apps. Set as the system default input, they gave one user
+// recordings of the start chime and background music instead of their voice ("♪", a few
+// garbage characters for a 14 s dictation). Deliberately excludes voice processors that DO
+// carry the microphone (Krisp, NVIDIA Broadcast...).
+const VIRTUAL_INPUT_RE = /blackhole|soundflower|loopback|zoomaudiodevice|zoom audio|background music|vb-cable|vb-audio|cable output|voicemeeter|ishowu|screenflick|camtasia|obs virtual|virtual desktop audio|teams audio|webex audio/i;
+
+export function isVirtualInput(label: string): boolean {
+  return VIRTUAL_INPUT_RE.test(label);
+}
+
+// Pick a real microphone when the default is a loopback device: prefer the built-in one.
+async function realMicrophone(): Promise<MediaDeviceInfo | null> {
+  try {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications' && !isVirtualInput(d.label),
+    );
+    return devices.find((d) => /macbook|built-in|internal|bawaan/i.test(d.label)) ?? devices[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 let mediaRecorder: MediaRecorder | null = null;
@@ -179,6 +205,20 @@ let lastHadSpeech = true;
 // noise. Telling the two apart turns a misleading "No speech detected" into the actual fix.
 let lastPeak = 0;
 let lastFrames = 0;
+// Voice-level time after the first ~1.2 s (which holds the start chime and any mute click), and
+// the frame length, for "the microphone hears almost nothing" detection.
+let lastLoudMs = 0;
+let lastFrameMs = 0;
+
+/**
+ * How much voice-level sound the latest recording held after its first ~1.2 s. Near zero over
+ * several seconds means the input is not hearing the user: wrong device, or input volume at
+ * the bottom. (Speech on a laptop mic sits well above the 0.01 RMS used here; a quiet room
+ * sits well below it.)
+ */
+export function micLevelSummary(): { loudMs: number; heardMs: number; peak: number } {
+  return { loudMs: Math.round(lastLoudMs), heardMs: Math.round(lastFrames * lastFrameMs), peak: Math.round(lastPeak * 1000) / 1000 };
+}
 
 /** True when the latest recording's microphone produced nothing but exact zeros. */
 export function micDeliveredNoSignal(): boolean {
@@ -345,6 +385,7 @@ function startVad(stream: MediaStream, opts: StartOptions) {
   lastHadSpeech = false;
   lastPeak = 0;
   lastFrames = 0;
+  lastLoudMs = 0;
 
   const fire = (reason: AutoStopReason) => {
     if (fired) return;
@@ -425,6 +466,8 @@ function startVad(stream: MediaStream, opts: StartOptions) {
     lastPeak = peak;
     lastFrames++;
     const rms = Math.sqrt(sum / input.length);
+    lastFrameMs = frameMs;
+    if (lastFrames * frameMs > 1200 && rms > 0.01) lastLoudMs += frameMs;
 
     // 2) single spectrum read -> feeds BOTH the visualizer and the flux feature
     a.getByteFrequencyData(freq);
@@ -603,6 +646,29 @@ export async function startRecording(opts: StartOptions = {}): Promise<void> {
   if (gen !== startGen) {
     stream.getTracks().forEach((t) => t.stop());
     throw new StartCancelled();
+  }
+
+  // System default is a loopback device (and the user did not pick one on purpose): switch to
+  // a real microphone for this recording and say so. An explicit choice in Settings is honoured.
+  if (!opts.deviceId) {
+    const current = stream.getAudioTracks()[0]?.label || '';
+    if (current && isVirtualInput(current)) {
+      const real = await realMicrophone();
+      if (real) {
+        try {
+          const replacement = await navigator.mediaDevices.getUserMedia({ audio: { ...baseAudio, deviceId: { exact: real.deviceId } } });
+          stream.getTracks().forEach((t) => t.stop());
+          stream = replacement;
+          opts.onDeviceFallback?.(current, real.label || 'microphone');
+        } catch (e) {
+          console.warn('[Voice] could not switch away from the virtual input:', e);
+        }
+      }
+    }
+    if (gen !== startGen) {
+      stream.getTracks().forEach((t) => t.stop());
+      throw new StartCancelled();
+    }
   }
 
   try {
