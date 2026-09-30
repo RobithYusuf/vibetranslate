@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.54',
+    date: '2026-09-30',
+    changes: [
+      'Live dictation: the text panel fits your screen and always shows what you just said; scrolling up to read back pauses that for a moment',
+      'Live dictation: when another app is in front, the panel tells you which shortcut finishes the dictation',
+    ],
+  },
+  {
     version: '1.0.53',
     date: '2026-09-30',
     changes: [

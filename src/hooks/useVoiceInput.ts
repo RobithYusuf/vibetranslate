@@ -6,6 +6,7 @@ import { VoiceMode, AIProvider } from '@/types';
 import { captureForegroundHwnd } from '@/services/keyboard';
 import { DEFAULT_VOICE_MAX_MINUTES, DEFAULT_VOICE_SILENCE_SEC } from '@/utils/constants';
 import type { VoiceCorrection } from '@/utils/voiceCorrections';
+import { formatShortcut } from '@/utils/helpers';
 
 // If the overlay never reports back (dropped 'voice-finished' / overlay wedged), force-clear
 // the recording flag after the max recording window + a generous processing budget, so the
@@ -65,6 +66,10 @@ export interface VoiceStartPayload {
     voiceCleanup: boolean;      // Original mode: AI transcript proofreading
     customBaseURL: string; // for provider === 'custom' (voice→translate step)
     customModel: string;
+    // How to finish, for the overlay's hint once it loses the keyboard (another app in front):
+    // the shortcut that started this run, and whether it is hold-to-talk (finish = release).
+    finishKey?: string;
+    holdToTalk?: boolean;
   };
 }
 
@@ -96,8 +101,9 @@ export function useVoiceInput() {
   }, [endSession]);
 
   const toggleVoice = useCallback(async (mode: VoiceMode) => {
-    const { isRecording, apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, voicePopupPosition, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, customBaseURL, customModel } =
+    const { isRecording, apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, voicePopupPosition, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMinutes, voiceSilenceSec, micDeviceId, voiceCorrections, customBaseURL, customModel, voiceShortcut, voiceOriginalShortcut, voiceHoldToTalk } =
       useAppStore.getState();
+    const finishKey = formatShortcut(mode === 'translate' ? voiceShortcut : voiceOriginalShortcut);
     // Per-user cap from Settings (minutes -> ms); falls back to the built-in default.
     const voiceMaxMs = (voiceMaxMinutes && voiceMaxMinutes >= 1 ? voiceMaxMinutes : DEFAULT_VOICE_MAX_MINUTES) * 60_000;
     const voiceSilenceMs = Math.round((voiceSilenceSec && voiceSilenceSec >= 0.5 ? voiceSilenceSec : DEFAULT_VOICE_SILENCE_SEC) * 1000);
@@ -157,7 +163,7 @@ export function useVoiceInput() {
       mode,
       targetApp,
       targetPos,
-      config: { apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMs, voiceSilenceMs, micDeviceId, voiceCorrections, customBaseURL, customModel },
+      config: { apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMs, voiceSilenceMs, micDeviceId, voiceCorrections, customBaseURL, customModel, finishKey, holdToTalk: voiceHoldToTalk },
     };
     void emitTo('recording', 'voice-start', payload);
     // Cold-start insurance: Tauri events aren't buffered, so if the overlay's listener wasn't

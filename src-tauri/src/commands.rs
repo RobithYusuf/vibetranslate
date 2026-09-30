@@ -749,8 +749,17 @@ pub async fn show_transcript(app: AppHandle) -> Result<(), String> {
 /// screen, so a taller window never covers the pill or runs off-screen.
 #[tauri::command]
 pub async fn resize_transcript_window(app: AppHandle, height: f64) -> Result<(), String> {
-    let h = height.clamp(74.0, 260.0);
     if let Some(w) = app.get_webview_window("transcript") {
+        // At most ~30% of the screen it is on: a fixed cap was a third of a laptop screen and
+        // a sliver of a 4K one. Past the cap the text scrolls inside, always showing the tail.
+        let screen_h = w
+            .current_monitor()
+            .ok()
+            .flatten()
+            .map(|m| m.size().height as f64 / m.scale_factor().max(0.5))
+            .unwrap_or(900.0);
+        let max_h = (screen_h * 0.3).clamp(120.0, 320.0);
+        let h = height.clamp(74.0, max_h);
         let cur = window_size_in_space(&w).1;
         if (cur - h).abs() < 2.0 {
             return Ok(()); // unchanged: skip the native resize + reposition

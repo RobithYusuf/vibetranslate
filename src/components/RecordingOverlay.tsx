@@ -716,8 +716,21 @@ export default function RecordingOverlay() {
       committed: v.committed,
       live: v.live,
       keys: document.hasFocus(),
+      finishKey: configRef.current?.finishKey || '',
+      holdToTalk: !!configRef.current?.holdToTalk,
     }).catch(() => { /* cosmetic */ });
   };
+  // Focus moving to or from this window changes what the hint row should say (edit keys vs
+  // "still recording, how to finish"), so republish then too, not only on new words.
+  useEffect(() => {
+    const refresh = () => { if (liveRef.current?.isActive) publishView(); };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('blur', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('blur', refresh);
+    };
+  }, []);
 
   // The transcript lives in its OWN window below this one (see TranscriptOverlay). Growing
   // this pill to fit a sentence pushed the text over the level bars and the done/cancel

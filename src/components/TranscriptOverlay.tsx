@@ -24,10 +24,16 @@ export function TranscriptOverlay() {
   const [committed, setCommitted] = useState('');
   const [live, setLive] = useState('');
   const [keys, setKeys] = useState(false);
+  const [finishKey, setFinishKey] = useState('');
+  const [holdToTalk, setHoldToTalk] = useState(false);
   const [focused, setFocused] = useState(false);
   const text = committed || live;
   const boxRef = useRef<HTMLDivElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const hintsRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLParagraphElement>(null);
+  // When the user scrolled up on purpose, reading back, the tail-follow waits instead of
+  // yanking the view down on every new word.
+  const userScrolledAtRef = useRef(0);
 
   // Round the NATIVE window, the same way the listening pill does. rounded-2xl on the div
   // only curves the content — the rectangular webview showed through at the corners as four
@@ -49,10 +55,12 @@ export function TranscriptOverlay() {
       // session's sentence from flashing up when the next session opens the window.
       if (p.isFinal) { setCommitted(''); setLive(''); }
     }).then((f) => { un = f; });
-    const unView = listen<{ committed: string; live: string; keys: boolean }>('transcript-view', (e) => {
+    const unView = listen<{ committed: string; live: string; keys: boolean; finishKey?: string; holdToTalk?: boolean }>('transcript-view', (e) => {
       setCommitted(e.payload.committed);
       setLive(e.payload.live);
       setKeys(e.payload.keys);
+      setFinishKey(e.payload.finishKey || '');
+      setHoldToTalk(!!e.payload.holdToTalk);
     });
     const onFocus = () => setFocused(true);
     const onBlur = () => setFocused(false);
@@ -81,54 +89,68 @@ export function TranscriptOverlay() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Follow the tail: a long dictation should show what was said last, not the beginning.
-  // And grow the window to fit (2 lines up to ~9, then it scrolls), instead of a fixed
-  // two-line slot that hid most of a longer dictation.
+  // Follow the tail: a long dictation should show what was said last, not the beginning —
+  // unless the user scrolled up in the last few seconds to read something back.
+  // And size the window to the content; Rust caps it relative to the screen, after which the
+  // text scrolls inside it.
   const lastHeightRef = useRef(0);
   useEffect(() => {
     const el = boxRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-    const root = rootRef.current;
-    if (!root) return;
-    const want = Math.ceil(root.scrollHeight);
+    if (el && Date.now() - userScrolledAtRef.current > 3000) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    // The text's own height, not the box's: the box fills the window, so measuring it could
+    // only ever grow the window, never shrink it back after a deletion. 14 = the box padding.
+    const want = Math.ceil((contentRef.current?.offsetHeight ?? 0) + 14 + (hintsRef.current?.offsetHeight ?? 0));
     if (Math.abs(want - lastHeightRef.current) < 4) return;
     lastHeightRef.current = want;
     void invoke('resize_transcript_window', { height: want }).catch(() => { /* cosmetic */ });
   }, [committed, live, keys, focused]);
 
-  const showHints = !!text && (keys || focused);
+  const onScroll = () => {
+    const el = boxRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+    userScrolledAtRef.current = atBottom ? 0 : Date.now();
+  };
+
+  const keysHere = keys || focused;
 
   return (
-    <div className="h-screen w-screen bg-[#1c1c1e]/90 overflow-hidden select-none">
-      {/* Measured for the window height: content-sized, capped by the window itself. */}
-      <div ref={rootRef} className="flex flex-col max-h-[260px]">
-        <div ref={boxRef} className="min-h-[50px] overflow-y-auto px-3 pt-2 pb-1.5">
-          {text ? (
-            <p className="text-[13px] leading-relaxed">
-              {/* Frozen text is final and editable; the rest can still change as the
-                  recogniser hears more, so it is drawn lighter. */}
-              {committed && <span className="text-white/85">{committed}</span>}
-              {committed && live && ' '}
-              {live && <span className="text-white/55">{live}</span>}
-              {/* Static, not pulsing. A blinking caret next to text that is ALREADY changing on
-                  its own reads as the whole overlay flickering — which is exactly how it was
-                  reported. The text updating is signal enough that something is happening. */}
-              <span className="ml-1 inline-block h-[12px] w-[2px] translate-y-[2px] bg-white/30" />
-            </p>
-          ) : (
-            <p className="text-[12px] italic text-white/25">Mendengarkan…</p>
-          )}
-        </div>
-        {showHints && (
-          <div className="shrink-0 px-3 pb-1.5 text-[10.5px] text-white/35 flex flex-wrap gap-x-3">
-            <span><kbd className="font-sans text-white/55">⌫</kbd> hapus kata</span>
-            <span><kbd className="font-sans text-white/55">{MOD}⌫</kbd> hapus semua</span>
-            <span><kbd className="font-sans text-white/55">{MOD}Z</kbd> urungkan</span>
-            <span><kbd className="font-sans text-white/55">↵</kbd> tempel</span>
-            <span><kbd className="font-sans text-white/55">esc</kbd> batal</span>
-          </div>
+    <div className="h-screen w-screen flex flex-col bg-[#1c1c1e]/90 overflow-hidden select-none">
+      <div ref={boxRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto px-3 pt-2 pb-1.5">
+        {text ? (
+          <p ref={contentRef} className="text-[13px] leading-relaxed">
+            {/* Frozen text is final and editable; the rest can still change as the
+                recogniser hears more, so it is drawn lighter. */}
+            {committed && <span className="text-white/85">{committed}</span>}
+            {committed && live && ' '}
+            {live && <span className="text-white/55">{live}</span>}
+            {/* Static, not pulsing. A blinking caret next to text that is ALREADY changing on
+                its own reads as the whole overlay flickering — which is exactly how it was
+                reported. The text updating is signal enough that something is happening. */}
+            <span className="ml-1 inline-block h-[12px] w-[2px] translate-y-[2px] bg-white/30" />
+          </p>
+        ) : (
+          <p ref={contentRef} className="text-[12px] italic text-white/25">Mendengarkan…</p>
         )}
       </div>
+      {/* One quiet line. With the keyboard here: the edit keys. Without it (another app in
+          front): only how to finish — the pill above already says it is still listening. */}
+      {text && (
+        <div ref={hintsRef} className="shrink-0 px-3 pb-1.5 text-[10.5px] text-white/35 flex flex-wrap gap-x-3">
+          {keysHere ? (
+            <>
+              <span><kbd className="font-sans text-white/55">⌫</kbd> hapus kata</span>
+              <span><kbd className="font-sans text-white/55">{MOD}⌫</kbd> hapus semua</span>
+              <span><kbd className="font-sans text-white/55">{MOD}Z</kbd> urungkan</span>
+              <span><kbd className="font-sans text-white/55">↵</kbd> tempel</span>
+              <span><kbd className="font-sans text-white/55">esc</kbd> batal</span>
+            </>
+          ) : finishKey ? (
+            <span>{holdToTalk ? 'Lepas' : 'Tekan'} <kbd className="font-sans text-white/55">{finishKey}</kbd> untuk selesai</span>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
