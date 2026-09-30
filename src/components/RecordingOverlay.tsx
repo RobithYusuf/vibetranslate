@@ -128,7 +128,8 @@ export default function RecordingOverlay() {
   const sessionIdRef = useRef<number>(-1);         // id of the run we (last) began; blocks re-emit resurrection
   const finishedRef = useRef(false);              // true once a terminal state ran (blocks late process/double-finish)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // deferred hide_recording; cleared on next begin()
-  const recStartedAtRef = useRef(0);              // capture start, for the diagnostics duration
+  const recStartedAtRef = useRef(0);
+  const livePartialsRef = useRef(0);               // partial results received this dictation (diagnostics)              // capture start, for the diagnostics duration
   const captureLiveRef = useRef(false);           // the recorder is actually capturing (set after startRecording)
   const pendingStopRef = useRef(false);           // a stop arrived during 'starting'; run it once capture is live
 
@@ -226,6 +227,7 @@ export default function RecordingOverlay() {
     let un: (() => void) | undefined;
     onLiveTranscript((p) => {
       if (!liveRef.current?.isActive || p.isFinal) return;
+      livePartialsRef.current++;
       if (editorRef.current.onPartial(p.text, p.seg)) publishView();
     }).then((f) => { un = f; });
     return () => { un?.(); };
@@ -311,6 +313,8 @@ export default function RecordingOverlay() {
         // path on ANY local failure — with a console warning, never silently worse
         // than before the feature existed.
         let rawTranscript: string;
+        // Which path produced the text, for the diagnostics log.
+        let sttPath = ['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine) ? 'offline' : 'online';
         // Detach the live session on EVERY branch, not just the active one. A session whose
         // model was still loading when the user stopped used to stay referenced through the
         // whole transcribe→translate→paste pipeline; when the load finally resolved it went
@@ -331,7 +335,9 @@ export default function RecordingOverlay() {
           // shouts (its vocabulary is upper case) — fix that before ANYTHING else touches the
           // text, because corrections, cleanup, translation and the paste are all downstream.
           const liveFinal = editorRef.current.finalText(await liveSession.finish());
+          diag('live', `partials=${livePartialsRef.current} final chars=${liveFinal.length}`);
           rawTranscript = liveFinal;
+          sttPath = 'live';
           // Hybrid: the on-device model is instant but has no punctuation and mishears more
           // than Whisper. When the user's engine is an online one anyway (so uploading the audio
           // is what they already chose) and they made no edits, re-transcribe the whole
@@ -339,7 +345,10 @@ export default function RecordingOverlay() {
           // this step can only improve the result, never lose it. Edited text always wins,
           // because a fresh transcript would bring the deleted words back.
           const onlineEngine = !['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine);
-          if (onlineEngine && !editorRef.current.edited && liveFinal.trim() && blob.size > 0) {
+          // Also when the live text is EMPTY: that is exactly when the live model failed to hear
+          // anything, and requiring live text first turned a working recording into "No speech
+          // detected" (diagnostics 3TS3SKQK: every live run chars=0, every normal run fine).
+          if (onlineEngine && !editorRef.current.edited && blob.size > 0) {
             const hc = new AbortController();
             const onAbort = () => hc.abort();
             controller.signal.addEventListener('abort', onAbort, { once: true });
@@ -354,7 +363,7 @@ export default function RecordingOverlay() {
                 fallbackLanguage: VOICE_AUTODETECT_FALLBACK_LANG,
                 signal: hc.signal,
               });
-              if (better.trim()) rawTranscript = better;
+              if (better.trim()) { rawTranscript = better; sttPath = liveFinal.trim() ? 'live+whisper' : 'live-empty->whisper'; }
             } catch (e) {
               if (controller.signal.aborted) throw e; // user cancelled: not a fallback case
               console.warn('[Voice] live: whole-recording pass failed, keeping live text:', e);
@@ -398,7 +407,7 @@ export default function RecordingOverlay() {
           });
         }
         if (stale()) return;
-        diag('stt', `${liveSession?.isActive ? 'live' : ['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine) ? 'offline' : 'online'} ok ${Math.round(performance.now() - tStt)}ms chars=${rawTranscript.length}`);
+        diag('stt', `${sttPath} ok ${Math.round(performance.now() - tStt)}ms chars=${rawTranscript.length}`);
         // User correction dictionary: deterministic fixes for habitual mis-hearings, applied to
         // the transcript BEFORE translation/pasting (voice only).
         const transcript = config.voiceCorrections?.length
@@ -593,6 +602,7 @@ export default function RecordingOverlay() {
       }
       liveRef.current = null;
       editorRef.current.reset();
+      livePartialsRef.current = 0;
       setLiveText('');
       if (wantLive) {
         const session = new LiveSession();
@@ -600,6 +610,7 @@ export default function RecordingOverlay() {
         session.begin((e) => {
           if (import.meta.env.DEV) void invoke('dev_log', { msg: `live unavailable: ${e}` }).catch(() => {});
           console.warn('[Voice] live mode unavailable, using one-shot transcription:', e);
+          diag('live', `unavailable, using one-shot: ${errorKind(String(e))}`);
           // Only detach OUR session: a stale rejection from a previous press must not
           // kill the live mode of the session that replaced it.
           if (liveRef.current === session) liveRef.current = null;

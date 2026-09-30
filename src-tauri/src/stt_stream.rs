@@ -66,6 +66,10 @@ impl Session {
 // A Mutex, not a channel: pushes arrive in order from one webview and each must finish decoding
 // before the next is accepted, or partial results would interleave into nonsense.
 static SESSION: std::sync::Mutex<Option<Session>> = std::sync::Mutex::new(None);
+/// Chunks pushed into / refused by the current dictation, reported to the diagnostics log on
+/// finish and reset there.
+static PUSH_ACCEPTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static PUSH_DROPPED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// The recogniser looks ahead (this model is chunk-16-left-128), so the final words never come
 /// out until it has seen silence past them. Without this a dictation loses its last word every
@@ -180,6 +184,7 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
         .map_err(|e| e.to_string())?
         .ok_or("gagal memuat model live")?;
     dlog!("[LiveSTT] model loaded in {}ms", t0.elapsed().as_millis());
+    crate::diag::log("live", &format!("model loaded in {}ms", t0.elapsed().as_millis()));
 
     let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = guard.as_mut() {
@@ -225,11 +230,14 @@ pub async fn stream_stt_push(
     let Some(s) = guard.as_mut() else {
         // Not an error: a chunk in flight when the user cancelled is expected.
         dlog!("[LiveSTT] push dropped: no session");
+        PUSH_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return Ok(());
     };
     if !s.accepting {
+        PUSH_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return Ok(()); // late chunk from a finished/cancelled run
     }
+    PUSH_ACCEPTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     // Kept after the outage it exposed: a JS-side bug meant this function was never called at
     // all, and the only reason that was provable — rather than guessable against "the mic is
@@ -287,6 +295,17 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
         .map(|r| r.text)
         .unwrap_or_default();
     dlog!("[LiveSTT] finish: {} chars", text.len());
+    // Per-dictation counters: an empty result with chunks accepted means the model heard audio
+    // but recognised nothing; with none accepted, the audio never reached it.
+    crate::diag::log(
+        "live",
+        &format!(
+            "finish chars={} chunks accepted={} dropped={}",
+            text.chars().count(),
+            PUSH_ACCEPTED.swap(0, std::sync::atomic::Ordering::Relaxed),
+            PUSH_DROPPED.swap(0, std::sync::atomic::Ordering::Relaxed),
+        ),
+    );
 
     // Kept loaded on purpose. Dropping it here would make the NEXT shortcut press wait for a
     // few hundred megabytes to load again — the delay the user loses their first words to.

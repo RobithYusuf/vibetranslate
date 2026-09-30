@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.58',
+    date: '2026-10-01',
+    changes: [
+      'Live dictation: when the on-device model hears nothing, the recording is now transcribed online instead of ending in "No speech detected"',
+      'More detail in the diagnostics log for live dictation',
+    ],
+  },
+  {
     version: '1.0.57',
     date: '2026-10-01',
     changes: [
