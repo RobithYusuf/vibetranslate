@@ -857,72 +857,75 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
       }
     }
   };
+  // One compact row per permission: icon, name + one-line description, then status and the
+  // action on the right, so a granted card is two lines instead of five. Help text only
+  // appears below a row that actually needs attention.
+  const permRow = (opts: {
+    icon: React.ReactNode;
+    tone: 'ok' | 'warn' | 'bad' | 'idle';
+    title: string;
+    desc: string;
+    status: string;
+    action?: { label: string; onClick: () => void; primary?: boolean };
+    help?: React.ReactNode;
+  }) => {
+    const box = { ok: 'bg-green-500/15 border-green-500/25', warn: 'bg-amber-500/15 border-amber-500/25', bad: 'bg-red-500/15 border-red-500/25', idle: 'bg-white/5 border-white/10' }[opts.tone];
+    const txt = { ok: 'text-green-400/90', warn: 'text-amber-400/90', bad: 'text-red-400/90', idle: 'text-white/40' }[opts.tone];
+    const btn = opts.action?.primary
+      ? (opts.tone === 'bad' ? 'bg-red-600/80 hover:bg-red-500 text-white font-medium' : 'bg-amber-600 hover:bg-amber-500 text-white font-medium')
+      : 'bg-white/5 hover:bg-white/10 text-white/70 border border-white/10';
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-3">
+          <span className={`w-7 h-7 rounded-md border grid place-items-center shrink-0 ${box}`}>{opts.icon}</span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-medium text-white/80 leading-tight">{opts.title}</div>
+            <div className="text-[12px] text-white/45 truncate">{opts.desc}</div>
+          </div>
+          {perms && <span className={`text-[11px] shrink-0 ${txt}`}>● {opts.status}</span>}
+          {opts.action && (
+            <button onClick={opts.action.onClick} className={`shrink-0 px-3 py-1.5 text-[12px] rounded transition-colors ${btn}`}>
+              {opts.action.label}
+            </button>
+          )}
+        </div>
+        {opts.help && <div className="pl-10 text-[12px]">{opts.help}</div>}
+      </div>
+    );
+  };
   const permissionsCard = isMac ? (
     <div className={`bg-[#252526] rounded-lg p-4 space-y-3 ${permsNeedAttention ? 'ring-1 ring-amber-500/40' : ''}`}>
-      {/* Accessibility */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2.5">
-          <span className={`w-6 h-6 rounded-md border grid place-items-center shrink-0 ${
-            perms?.accessibility ? 'bg-green-500/15 border-green-500/25' : 'bg-amber-500/15 border-amber-500/25'
-          }`}>
-            <Accessibility size={14} className={perms?.accessibility ? 'text-green-400' : 'text-amber-400'} />
-          </span>
-          <span className="text-[14px] font-medium text-white/80">{t('macAccessibility')}</span>
-          {perms && (
-            <span className={`ml-auto text-[10px] shrink-0 ${perms.accessibility ? 'text-green-400/90' : 'text-amber-400/90'}`}>
-              ● {perms.accessibility ? t('permGranted') : t('permMissing')}
-            </span>
-          )}
-        </div>
-        <p className="text-[12px] text-white/50">{t('macAccessibilityDesc')}</p>
-        {perms && !perms.accessibility && (
-          <p className="text-[12px] text-amber-400/80">{t('macAccessibilityHelp')}</p>
-        )}
-        <button
-          onClick={() => { void invoke('open_accessibility_settings').catch(() => {}); }}
-          className={perms?.accessibility
-            ? 'px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors'
-            : 'w-full px-3 py-2 text-[12px] bg-amber-600 hover:bg-amber-500 text-white rounded font-medium transition-colors'}
-        >
-          {t('openAccessibilitySettings')}
-        </button>
-      </div>
-
-      {/* Microphone */}
-      <div className="space-y-2 pt-3 border-t border-white/5">
-        <div className="flex items-center gap-2.5">
-          <span className={`w-6 h-6 rounded-md border grid place-items-center shrink-0 ${
-            micOk ? 'bg-green-500/15 border-green-500/25' : micBad ? 'bg-red-500/15 border-red-500/25' : 'bg-white/5 border-white/10'
-          }`}>
-            <Mic size={14} className={micOk ? 'text-green-400' : micBad ? 'text-red-400' : 'text-white/50'} />
-          </span>
-          <span className="text-[14px] font-medium text-white/80">{t('macMicrophone')}</span>
-          {perms && (
-            <span className={`ml-auto text-[10px] shrink-0 ${micOk ? 'text-green-400/90' : micBad ? 'text-red-400/90' : 'text-white/40'}`}>
-              ● {micOk ? t('permGranted') : micState === 'denied' ? t('permBlocked') : micState === 'restricted' ? t('permRestricted') : t('permNotAsked')}
-            </span>
-          )}
-        </div>
-        <p className="text-[12px] text-white/50">{t('macMicrophoneDesc')}</p>
-        {micState === 'denied' && <p className="text-[12px] text-red-400/90">{t('permMicDenied')}</p>}
-        {micState === 'restricted' && <p className="text-[12px] text-red-400/90">{t('permMicRestricted')}</p>}
-        {micState === 'denied' && (
-          <button
-            onClick={() => { void invoke('open_microphone_settings').catch(() => {}); }}
-            className="w-full px-3 py-2 text-[12px] bg-red-600/80 hover:bg-red-500 text-white rounded font-medium transition-colors"
-          >
-            {t('openMicrophoneSettings')}
-          </button>
-        )}
-        {perms && !micOk && !micBad && (
-          <button
-            onClick={() => { void requestMicrophone(); }}
-            className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
-          >
-            {t('allowMicrophone')}
-          </button>
-        )}
-      </div>
+      {permRow({
+        icon: <Accessibility size={14} className={perms?.accessibility ? 'text-green-400' : 'text-amber-400'} />,
+        tone: perms?.accessibility ? 'ok' : 'warn',
+        title: t('macAccessibility'),
+        desc: t('macAccessibilityDesc'),
+        status: perms?.accessibility ? t('permGranted') : t('permMissing'),
+        action: {
+          label: perms?.accessibility ? t('permBannerOpen') : t('openAccessibilitySettings'),
+          onClick: () => { void invoke('open_accessibility_settings').catch(() => {}); },
+          primary: !perms?.accessibility,
+        },
+        help: perms && !perms.accessibility ? <p className="text-amber-400/80">{t('macAccessibilityHelp')}</p> : undefined,
+      })}
+      <div className="border-t border-white/5" />
+      {permRow({
+        icon: <Mic size={14} className={micOk ? 'text-green-400' : micBad ? 'text-red-400' : 'text-white/50'} />,
+        tone: micOk ? 'ok' : micBad ? 'bad' : 'idle',
+        title: t('macMicrophone'),
+        desc: t('macMicrophoneDesc'),
+        status: micOk ? t('permGranted') : micState === 'denied' ? t('permBlocked') : micState === 'restricted' ? t('permRestricted') : t('permNotAsked'),
+        action: micState === 'denied'
+          ? { label: t('openMicrophoneSettings'), onClick: () => { void invoke('open_microphone_settings').catch(() => {}); }, primary: true }
+          : perms && !micOk && !micBad
+            ? { label: t('allowMicrophone'), onClick: () => { void requestMicrophone(); } }
+            : undefined,
+        help: micState === 'denied'
+          ? <p className="text-red-400/90">{t('permMicDenied')}</p>
+          : micState === 'restricted'
+            ? <p className="text-red-400/90">{t('permMicRestricted')}</p>
+            : undefined,
+      })}
     </div>
   ) : null;
 

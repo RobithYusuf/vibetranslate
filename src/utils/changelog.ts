@@ -10,6 +10,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.61',
+    date: '2026-10-01',
+    changes: [
+      'Settings: the permissions card is more compact, one line per permission with the button next to its status',
+    ],
+  },
+  {
     version: '1.0.60',
     date: '2026-10-01',
     changes: [
