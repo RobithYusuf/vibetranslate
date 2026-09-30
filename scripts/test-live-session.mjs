@@ -39,11 +39,20 @@ export const startLive = async (): Promise<void> => { await new Promise(r => set
 export const pushLive = async (_pcm: Int16Array): Promise<void> => { pushes++; };
 export const finishLive = async (): Promise<string> => 'ok';
 export const cancelLive = async (): Promise<void> => {};
+// commit() must drain the queue BEFORE freezing the segment, or the words said just before a
+// Backspace would land in the next segment (or be lost). Record how many chunks had been
+// pushed at the moment the recogniser was asked to commit.
+let pushesAtCommit = -1;
+export const getPushesAtCommit = (): number => pushesAtCommit;
+export const commitLive = async (): Promise<{ text: string; seg: number }> => {
+  pushesAtCommit = pushes;
+  return { text: 'ok', seg: 1 };
+};
 `);
 
   writeFileSync(join(dir, 'run.ts'), `
 import { LiveSession } from './liveSession.ts';
-import { getPushes } from './sttStream.ts';
+import { getPushes, getPushesAtCommit } from './sttStream.ts';
 
 const CHUNKS = 12;
 const session = new LiveSession();
@@ -58,13 +67,21 @@ const timer = setInterval(() => {
 }, 20);
 
 setTimeout(async () => {
-  await session.finish();
-  const pushed = getPushes();
-  if (pushed !== CHUNKS) {
-    console.log(\`FAIL: fed \${CHUNKS} chunks, only \${pushed} reached the recogniser\`);
+  // A live edit mid-dictation: everything fed so far must be pushed before the commit.
+  await session.commit();
+  if (getPushesAtCommit() !== CHUNKS) {
+    console.log(\`FAIL: commit ran after \${getPushesAtCommit()} of \${CHUNKS} chunks; queued audio was not drained first\`);
     process.exit(1);
   }
-  console.log(\`ok - all \${CHUNKS} chunks reached the recogniser, including those fed during model load\`);
+  // The dictation goes on after the edit.
+  for (let i = 0; i < 3; i++) session.feed(new Int16Array(3200));
+  await session.finish();
+  const pushed = getPushes();
+  if (pushed !== CHUNKS + 3) {
+    console.log(\`FAIL: fed \${CHUNKS + 3} chunks, only \${pushed} reached the recogniser\`);
+    process.exit(1);
+  }
+  console.log(\`ok - all \${CHUNKS + 3} chunks reached the recogniser, including those fed during model load and after a live edit\`);
 }, 600);
 `);
 

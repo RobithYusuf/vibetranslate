@@ -173,6 +173,17 @@ let ctxKeepAlive: (() => void) | null = null;
 // Defaults assume speech, so if VAD can't initialize we never wrongly block.
 let lastVoicedMs = 0;
 let lastHadSpeech = true;
+// Loudest raw sample of the latest recording, and how many frames it covered. A microphone
+// macOS has silently cut off (the grant belongs to an older signature, or was revoked) still
+// "works" for getUserMedia but delivers exact digital zeros, while even a silent room has some
+// noise. Telling the two apart turns a misleading "No speech detected" into the actual fix.
+let lastPeak = 0;
+let lastFrames = 0;
+
+/** True when the latest recording's microphone produced nothing but exact zeros. */
+export function micDeliveredNoSignal(): boolean {
+  return lastFrames >= 20 && lastPeak === 0; // ~0.5s+ of frames, not one stray empty buffer
+}
 
 export interface RecordingResult {
   blob: Blob;
@@ -332,6 +343,8 @@ function startVad(stream: MediaStream, opts: StartOptions) {
   // VAD is active now -> start measuring this recording's speech from zero.
   lastVoicedMs = 0;
   lastHadSpeech = false;
+  lastPeak = 0;
+  lastFrames = 0;
 
   const fire = (reason: AutoStopReason) => {
     if (fired) return;
@@ -403,7 +416,14 @@ function startVad(stream: MediaStream, opts: StartOptions) {
     // 1) time-domain RMS
     const input = e.inputBuffer.getChannelData(0);
     let sum = 0;
-    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+    let peak = lastPeak;
+    for (let i = 0; i < input.length; i++) {
+      const v = input[i];
+      sum += v * v;
+      if (v > peak) peak = v; else if (-v > peak) peak = -v;
+    }
+    lastPeak = peak;
+    lastFrames++;
     const rms = Math.sqrt(sum / input.length);
 
     // 2) single spectrum read -> feeds BOTH the visualizer and the flux feature

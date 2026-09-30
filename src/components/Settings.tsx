@@ -900,7 +900,45 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Settings Panel */}
-        <div className={`${showConsole ? 'w-1/2' : 'flex-1'} overflow-y-auto p-6 bg-[#1e1e1e]`}>
+        <div className={`${showConsole ? 'w-1/2' : 'flex-1'} min-w-0 flex flex-col bg-[#1e1e1e]`}>
+          {/* Missing permissions, pinned ABOVE the scrolling content on every tab. The full
+              card sits at the bottom of General, where a user who never scrolls that far
+              only found out when shortcuts silently did nothing. One line per problem. */}
+          {isMac && perms && (!perms.accessibility || perms.microphone === 'denied' || perms.microphone === 'restricted') && (
+            <div role="alert" className="shrink-0 border-b border-amber-500/20 bg-amber-500/[0.08] px-6 py-2 space-y-1.5">
+              {!perms.accessibility && (
+                <div className="flex items-center gap-2.5">
+                  <Accessibility size={14} className="text-amber-400 shrink-0" />
+                  <span className="flex-1 min-w-0 text-[12.5px] text-amber-100/90">{t('permBannerAx')}</span>
+                  <button
+                    onClick={() => { void invoke('open_accessibility_settings').catch(() => {}); }}
+                    className="shrink-0 px-2.5 py-1 text-[12px] font-medium bg-amber-600 hover:bg-amber-500 text-white rounded transition-colors"
+                  >
+                    {t('permBannerOpen')}
+                  </button>
+                </div>
+              )}
+              {(perms.microphone === 'denied' || perms.microphone === 'restricted') && (
+                <div className="flex items-center gap-2.5">
+                  <Mic size={14} className="text-red-400 shrink-0" />
+                  <span className="flex-1 min-w-0 text-[12.5px] text-red-100/90">
+                    {perms.microphone === 'denied' ? t('permBannerMic') : t('permBannerMicRestricted')}
+                  </span>
+                  {perms.microphone === 'denied' && (
+                    <button
+                      onClick={() => { void invoke('open_microphone_settings').catch(() => {}); }}
+                      className="shrink-0 px-2.5 py-1 text-[12px] font-medium bg-red-600/80 hover:bg-red-500 text-white rounded transition-colors"
+                    >
+                      {t('permBannerOpen')}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {/* min-h-0: a flex child defaults to min-height:auto and would grow past the panel
+              instead of scrolling. */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-6">
           {activeTab === 'general' && (
             <div className="space-y-5 w-full">
               {/* AI Provider & API Key — and the app-wide power switch, in this header.
@@ -1639,7 +1677,9 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                         console.error('Failed to open accessibility settings:', err);
                       }
                     }}
-                    className="w-full px-3 py-2 text-[12px] bg-amber-600 hover:bg-amber-500 text-white rounded font-medium transition-colors"
+                    className={perms?.accessibility
+                      ? 'px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors'
+                      : 'w-full px-3 py-2 text-[12px] bg-amber-600 hover:bg-amber-500 text-white rounded font-medium transition-colors'}
                   >
                     {t('openAccessibilitySettings')}
                   </button>
@@ -2186,6 +2226,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
               </div>
             </div>
           )}
+          </div>
         </div>
 
         {/* Console Panel */}

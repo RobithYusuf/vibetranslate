@@ -10,6 +10,8 @@ export const LIVE_MODEL_ID = 'streaming-multi';
 export interface PartialTranscript {
   text: string;
   isFinal: boolean;
+  /** Recogniser segment that produced it; see LiveEditor and stream_stt_commit. */
+  seg: number;
 }
 
 export async function startLive(): Promise<void> {
@@ -27,6 +29,11 @@ export async function pushLive(pcm: Int16Array): Promise<void> {
 
 export async function finishLive(): Promise<string> {
   return await invoke<string>('stream_stt_finish');
+}
+
+/** End the current segment mid-dictation (for editing): flushed text + the new segment id. */
+export async function commitLive(): Promise<{ text: string; seg: number }> {
+  return await invoke<{ text: string; seg: number }>('stream_stt_commit');
 }
 
 export async function cancelLive(): Promise<void> {
@@ -48,7 +55,7 @@ export async function releaseLive(): Promise<void> {
 }
 
 export function onLiveTranscript(cb: (p: PartialTranscript) => void): Promise<UnlistenFn> {
-  return listen<{ text: string; is_final: boolean }>('live-transcript', (e) =>
-    cb({ text: e.payload.text, isFinal: e.payload.is_final }),
+  return listen<{ text: string; is_final: boolean; seg?: number }>('live-transcript', (e) =>
+    cb({ text: e.payload.text, isFinal: e.payload.is_final, seg: e.payload.seg ?? 0 }),
   );
 }

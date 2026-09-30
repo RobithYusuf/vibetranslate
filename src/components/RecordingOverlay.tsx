@@ -1,13 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
-import { listen, emit } from '@tauri-apps/api/event';
+import { listen, emit, emitTo } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { Loader2, Check, X } from 'lucide-react';
 import { VoiceStatus, VoiceMode } from '@/types';
 import { VOICE_STATUS_MESSAGES, VOICE_BAR_COUNT, MAX_TRANSLATE_CHARS, VOICE_AUTODETECT_FALLBACK_LANG } from '@/utils/constants';
-import { startRecording, stopRecording, cancelRecording } from '@/services/audioRecorder';
+import { startRecording, stopRecording, cancelRecording, micDeliveredNoSignal } from '@/services/audioRecorder';
 import { onLiveTranscript } from '@/services/sttStream';
 import { LiveSession } from '@/services/liveSession';
-import { humanizeTranscript } from '@/utils/humanizeTranscript';
+import { LiveEditor } from '@/services/liveEditor';
 import { transcribe, prewarmTranscription } from '@/services/transcription';
 import { translateText } from '@/services/openai';
 import { setClipboardText } from '@/services/clipboard';
@@ -63,6 +63,16 @@ function reportVoiceError(msg: string): string {
 // it is right. Used by EVERY no-speech exit: the silent-mic case lands on the VAD and server
 // no-speech paths far more often than on the empty-text one.
 async function noSpeechReason(): Promise<string> {
+  // Exact digital silence: macOS reports the grant as fine but hands us a dead microphone.
+  // Seen right after an update changed the app's signature; only re-granting fixes it.
+  if (micDeliveredNoSignal()) {
+    void notify(
+      'Microphone gives no audio',
+      'macOS is blocking the microphone for VibeTranslate. Open System Settings › Privacy & Security › Microphone, turn VibeTranslate off and on again, then retry.',
+    );
+    void invoke('open_microphone_settings').catch(() => {});
+    return 'Mic permission blocked — re-allow';
+  }
   try {
     const p = await invoke<{ microphone: string }>('permission_status');
     if (p.microphone === 'denied') return 'Microphone blocked — re-grant it in System Settings';
@@ -158,6 +168,8 @@ export default function RecordingOverlay() {
       liveRef.current.cancel();
       liveRef.current = null;
     }
+    editorRef.current.reset();
+    void emitTo('transcript', 'transcript-view', { committed: '', live: '', keys: false }).catch(() => {});
     setLiveText('');
     transcriptShownRef.current = false;
     void invoke('hide_transcript').catch(() => { /* cosmetic */ });
@@ -210,14 +222,39 @@ export default function RecordingOverlay() {
   useEffect(() => {
     let un: (() => void) | undefined;
     onLiveTranscript((p) => {
-      if (!liveRef.current?.isActive) return;
-      setLiveText(p.text);
+      if (!liveRef.current?.isActive || p.isFinal) return;
+      if (editorRef.current.onPartial(p.text, p.seg)) publishView();
     }).then((f) => { un = f; });
     return () => { un?.(); };
   }, []);
 
   // --- The voice lifecycle (ported from the old main-window useVoiceInput hook) ---
   useEffect(() => {
+    // Live editing (Backspace / Cmd-Backspace / Cmd-Z while dictating live). Edits run one at a
+    // time: each one first freezes the current segment (a round-trip to the recogniser), and a
+    // second Backspace must see the text the first one left behind.
+    let editChain: Promise<void> = Promise.resolve();
+    const edit = (op: 'word' | 'all' | 'undo') => {
+      editChain = editChain.then(async () => {
+        const session = liveRef.current;
+        if (!session?.isActive || processingRef.current || finishedRef.current || !captureLiveRef.current) return;
+        const ed = editorRef.current;
+        if (op !== 'undo') {
+          const r = await session.commit();
+          // The dictation ended or was cancelled while freezing; this edit is moot.
+          // (process() waits for this chain before it detaches the session, so a finish
+          // never loses the text frozen here.)
+          if (liveRef.current !== session) return;
+          ed.absorb(r.text, r.seg);
+        }
+        if (op === 'word') ed.deleteWord();
+        else if (op === 'all') ed.clearAll();
+        else ed.undo();
+        publishView();
+      }).catch((e) => { console.warn('[Voice] live edit failed:', e); });
+      return editChain;
+    };
+
     // Finish + paste: stop recording, transcribe, (optionally translate), paste.
     const process = async (auto = false) => {
       if (processingRef.current || finishedRef.current) return; // never run after a terminal state
@@ -272,6 +309,8 @@ export default function RecordingOverlay() {
         // whole transcribe→translate→paste pipeline; when the load finally resolved it went
         // active, drained 30s of queued audio, and popped the transcript window back open
         // mid-paste replaying the finished sentence.
+        // An edit still freezing its segment must land first, or its text would be lost.
+        await editChain;
         const liveSession = liveRef.current;
         liveRef.current = null;
         if (liveSession && !liveSession.isActive) {
@@ -284,7 +323,39 @@ export default function RecordingOverlay() {
           // flushes the recogniser's look-ahead and returns the final version. The recogniser
           // shouts (its vocabulary is upper case) — fix that before ANYTHING else touches the
           // text, because corrections, cleanup, translation and the paste are all downstream.
-          rawTranscript = humanizeTranscript(await liveSession.finish(), true);
+          const liveFinal = editorRef.current.finalText(await liveSession.finish());
+          rawTranscript = liveFinal;
+          // Hybrid: the on-device model is instant but has no punctuation and mishears more
+          // than Whisper. When the user's engine is an online one anyway (so uploading the audio
+          // is what they already chose) and they made no edits, re-transcribe the whole
+          // recording and paste that instead. Bounded, and any failure keeps the live text:
+          // this step can only improve the result, never lose it. Edited text always wins,
+          // because a fresh transcript would bring the deleted words back.
+          const onlineEngine = !['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine);
+          if (onlineEngine && !editorRef.current.edited && liveFinal.trim() && blob.size > 0) {
+            const hc = new AbortController();
+            const onAbort = () => hc.abort();
+            controller.signal.addEventListener('abort', onAbort, { once: true });
+            const timer = setTimeout(() => hc.abort(), 5000);
+            try {
+              const better = await transcribe({
+                blob,
+                provider: config.provider,
+                apiKeys: config.apiKeys,
+                preferProvider: config.voiceSttEngine,
+                language: config.sourceLang || 'auto',
+                fallbackLanguage: VOICE_AUTODETECT_FALLBACK_LANG,
+                signal: hc.signal,
+              });
+              if (better.trim()) rawTranscript = better;
+            } catch (e) {
+              if (controller.signal.aborted) throw e; // user cancelled: not a fallback case
+              console.warn('[Voice] live: whole-recording pass failed, keeping live text:', e);
+            } finally {
+              clearTimeout(timer);
+              controller.signal.removeEventListener('abort', onAbort);
+            }
+          }
         } else if (['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine)) {
           try {
             const t0 = performance.now();
@@ -505,6 +576,7 @@ export default function RecordingOverlay() {
         void invoke('dev_log', { msg: `voice-start wantLive=${wantLive} engine=${payload.config.voiceSttEngine} mic=${payload.config.micDeviceId || 'default'} boost=${payload.config.micAutoGain}` }).catch(() => {});
       }
       liveRef.current = null;
+      editorRef.current.reset();
       setLiveText('');
       if (wantLive) {
         const session = new LiveSession();
@@ -599,8 +671,14 @@ export default function RecordingOverlay() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
       else if (e.key === 'Enter') { e.preventDefault(); if (!processingRef.current) void process(); }
+      // Live edits. This window holds the keyboard while recording, so these never reach the
+      // app being dictated into.
+      else if (e.key === 'Backspace') { e.preventDefault(); void edit(e.metaKey || e.ctrlKey ? 'all' : 'word'); }
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); void edit('undo'); }
     };
     window.addEventListener('keydown', onKey);
+    // The same keys pressed while the transcript window holds focus.
+    const unEdit = listen<'word' | 'all' | 'undo'>('voice-edit', (e) => { void edit(e.payload); });
 
     // Expose the handlers to the buttons (rendered below) via refs.
     processHandlerRef.current = () => { if (!processingRef.current) void process(); };
@@ -610,6 +688,7 @@ export default function RecordingOverlay() {
       unStart.then((f) => f());
       unStop.then((f) => f());
       unCancel.then((f) => f());
+      unEdit.then((f) => f());
       window.removeEventListener('keydown', onKey);
     };
   }, []);
@@ -627,6 +706,18 @@ export default function RecordingOverlay() {
   // transcript never fight over the same slot.
   const [liveText, setLiveText] = useState('');
   const liveRef = useRef<LiveSession | null>(null);
+  const editorRef = useRef(new LiveEditor());
+  // One source of truth for what the transcript window shows: frozen (editable) text and the
+  // part still being recognised, plus whether edit keys will actually reach us right now.
+  const publishView = () => {
+    const v = editorRef.current.view();
+    setLiveText(v.full);
+    void emitTo('transcript', 'transcript-view', {
+      committed: v.committed,
+      live: v.live,
+      keys: document.hasFocus(),
+    }).catch(() => { /* cosmetic */ });
+  };
 
   // The transcript lives in its OWN window below this one (see TranscriptOverlay). Growing
   // this pill to fit a sentence pushed the text over the level bars and the done/cancel

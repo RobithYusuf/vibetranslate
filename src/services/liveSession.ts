@@ -1,4 +1,4 @@
-import { startLive, pushLive, finishLive, cancelLive } from './sttStream';
+import { startLive, pushLive, finishLive, cancelLive, commitLive } from './sttStream';
 
 /**
  * One live-dictation session: model startup, audio queueing, and teardown, in one place.
@@ -74,6 +74,16 @@ export class LiveSession {
     await this.drain();
     this.active = false;
     return finishLive();
+  }
+
+  /**
+   * Freeze what has been said so far (for an edit) and keep listening. Drains first, for the
+   * same reason as finish(): audio already queued belongs to the segment being frozen.
+   */
+  async commit(): Promise<{ text: string; seg: number }> {
+    await (this.drainPromise ?? Promise.resolve());
+    await this.drain();
+    return commitLive();
   }
 
   /** Abandon without producing text. Safe to call while startup is still in flight — the

@@ -25,6 +25,10 @@ pub struct PartialTranscript {
     pub text: String,
     /// True once the utterance has been finalised — the overlay stops showing it as provisional.
     pub is_final: bool,
+    /// Which stream produced this text. Bumped on every renew, so a partial decoded just
+    /// before a commit (Backspace) can be told apart from the new segment's text and ignored,
+    /// instead of bringing the deleted words back.
+    pub seg: u64,
 }
 
 struct Session {
@@ -39,6 +43,8 @@ struct Session {
     /// last_emit_at, emit a provisional transcript right AFTER the is_final clear, bringing
     /// the abandoned sentence back on screen.
     accepting: bool,
+    /// Segment counter, see PartialTranscript::seg.
+    seg: u64,
 }
 
 impl Session {
@@ -50,6 +56,7 @@ impl Session {
     /// pasted twice. Creating a stream is cheap; it is the model behind it that costs seconds
     /// and hundreds of megabytes, and that is what stays.
     fn renew(&mut self) {
+        self.seg = self.seg.wrapping_add(1);
         self.stream = self.recognizer.create_stream();
         self.last_emitted.clear();
         self.last_emit_at = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -193,6 +200,7 @@ pub async fn stream_stt_start(app: tauri::AppHandle, model_id: String) -> Result
         last_emit_at: std::time::Instant::now() - std::time::Duration::from_secs(1),
         last_used: std::time::Instant::now(),
         accepting: true,
+        seg: 0,
     });
     start_idle_evictor();
     Ok(())
@@ -249,7 +257,7 @@ pub async fn stream_stt_push(
             s.last_emit_at = std::time::Instant::now();
             let _ = app.emit(
                 "live-transcript",
-                PartialTranscript { text: r.text, is_final: false },
+                PartialTranscript { text: r.text, is_final: false, seg: s.seg },
             );
         }
     }
@@ -263,7 +271,7 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
     let Some(s) = guard.as_mut() else {
         // Session already gone (live toggled off mid-dictation): still send the final
         // marker, or the transcript window keeps the abandoned sentence in state.
-        let _ = app.emit("live-transcript", PartialTranscript { text: String::new(), is_final: true });
+        let _ = app.emit("live-transcript", PartialTranscript { text: String::new(), is_final: true, seg: 0 });
         return Ok(String::new());
     };
 
@@ -283,14 +291,16 @@ pub async fn stream_stt_finish(app: tauri::AppHandle) -> Result<String, String> 
     // Kept loaded on purpose. Dropping it here would make the NEXT shortcut press wait for a
     // few hundred megabytes to load again — the delay the user loses their first words to.
     // stream_stt_release frees it when live dictation is switched off.
+    let mut seg = 0;
     if let Some(s) = guard.as_mut() {
         s.renew();
         s.last_used = std::time::Instant::now();
         s.accepting = false;
+        seg = s.seg;
     }
     let _ = app.emit(
         "live-transcript",
-        PartialTranscript { text: text.clone(), is_final: true },
+        PartialTranscript { text: text.clone(), is_final: true, seg },
     );
     Ok(text)
 }
@@ -304,8 +314,43 @@ pub async fn stream_stt_cancel(app: tauri::AppHandle) -> Result<(), String> {
     }
     // The overlay clears its text only on an is_final event; without one a cancelled
     // session's sentence lingered and flashed up when the window was next shown.
-    let _ = app.emit("live-transcript", PartialTranscript { text: String::new(), is_final: true });
+    let _ = app.emit("live-transcript", PartialTranscript { text: String::new(), is_final: true, seg: 0 });
     Ok(())
+}
+
+/// Result of a mid-dictation commit: the flushed text of the segment that just ended, and the
+/// id of the segment that starts now (partials from older segments must be ignored).
+#[derive(serde::Serialize)]
+pub struct CommitResult {
+    pub text: String,
+    pub seg: u64,
+}
+
+/// End the CURRENT segment without ending the dictation: flush the recogniser's look-ahead so
+/// the last words are not lost, return that text, and start a new stream on the same model.
+///
+/// Used by live editing (Backspace). Deleting words the recogniser could still revise does not
+/// work: its next partial would bring them back. Freezing the text first makes it editable,
+/// and the audio that follows lands in a fresh segment.
+#[tauri::command]
+pub async fn stream_stt_commit() -> Result<CommitResult, String> {
+    let mut guard = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(s) = guard.as_mut() else {
+        return Ok(CommitResult { text: String::new(), seg: 0 });
+    };
+    if !s.accepting {
+        return Ok(CommitResult { text: String::new(), seg: s.seg });
+    }
+    let tail = vec![0f32; 16000 * TAIL_SILENCE_MS / 1000];
+    s.stream.accept_waveform(16000, &tail);
+    s.stream.input_finished();
+    while s.recognizer.is_ready(&s.stream) {
+        s.recognizer.decode(&s.stream);
+    }
+    let text = s.recognizer.get_result(&s.stream).map(|r| r.text).unwrap_or_default();
+    s.renew(); // keeps accepting = true: the dictation goes on
+    s.last_used = std::time::Instant::now();
+    Ok(CommitResult { text, seg: s.seg })
 }
 
 /// Free the model. Called when live dictation is turned off — there is no reason to hold a few

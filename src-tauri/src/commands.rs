@@ -744,6 +744,24 @@ pub async fn show_transcript(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Grow or shrink the transcript window to fit its text (the webview measures it), clamped,
+/// then re-place it: under the pill, or above it when the pill sits at the bottom of the
+/// screen, so a taller window never covers the pill or runs off-screen.
+#[tauri::command]
+pub async fn resize_transcript_window(app: AppHandle, height: f64) -> Result<(), String> {
+    let h = height.clamp(74.0, 260.0);
+    if let Some(w) = app.get_webview_window("transcript") {
+        let cur = window_size_in_space(&w).1;
+        if (cur - h).abs() < 2.0 {
+            return Ok(()); // unchanged: skip the native resize + reposition
+        }
+        w.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 520.0, height: h }))
+            .map_err(|e| e.to_string())?;
+        position_transcript_window(&app);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn hide_transcript(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("transcript") {
@@ -965,6 +983,23 @@ pub async fn open_accessibility_settings() -> Result<(), String> {
         // No-op on other platforms
     }
     
+    Ok(())
+}
+
+/// Open System Settings at Privacy & Security › Microphone. Used by the permission banner
+/// when the grant was denied (an unsigned update used to revoke it silently).
+#[tauri::command]
+pub async fn open_microphone_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut child = Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
     Ok(())
 }
 

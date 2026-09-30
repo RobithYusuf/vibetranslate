@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.53',
+    date: '2026-09-30',
+    changes: [
+      'Live dictation: fix mistakes while you speak. Backspace deletes the last word, Cmd/Ctrl+Backspace clears everything, Cmd/Ctrl+Z undoes. Nothing is deleted in the app you are dictating into',
+      'Live dictation: the text panel grows with what you say, and words that may still change are shown dimmed',
+      'Live dictation: with an online voice engine, the final text is re-checked against the whole recording for punctuation and accuracy. If that is slow or fails, your live text is used',
+      'Missing permissions now show as a banner at the top of Settings, with a button that opens the right System Settings page',
+      'If macOS blocks the microphone, voice now says so ("Mic permission blocked — re-allow") instead of "No speech detected", and opens the Microphone settings',
+    ],
+  },
+  {
     version: '1.0.52',
     date: '2026-09-27',
     changes: [

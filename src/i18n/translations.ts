@@ -133,6 +133,10 @@ export const translations = {
     // macOS Accessibility
     permGranted: 'Granted',
     permMissing: 'Not granted',
+    permBannerAx: 'Accessibility is off, so shortcuts cannot copy or paste.',
+    permBannerMic: 'Microphone is blocked, so voice input hears nothing.',
+    permBannerMicRestricted: 'Microphone is restricted by a device policy.',
+    permBannerOpen: 'Open Settings',
     permMicDenied: 'Microphone access is blocked — voice features will record silence. Grant it in System Settings › Privacy & Security › Microphone.',
     permMicRestricted: 'Microphone access is restricted by a device policy — you cannot change this yourself. Ask whoever manages this Mac.',
     macAccessibility: 'macOS Accessibility',
@@ -416,6 +420,10 @@ export const translations = {
     // macOS Accessibility
     permGranted: 'Diizinkan',
     permMissing: 'Belum diizinkan',
+    permBannerAx: 'Aksesibilitas belum aktif, shortcut tidak bisa copy/paste.',
+    permBannerMic: 'Mikrofon diblokir, voice tidak bisa mendengar.',
+    permBannerMicRestricted: 'Mikrofon dibatasi kebijakan perangkat.',
+    permBannerOpen: 'Buka Pengaturan',
     permMicDenied: 'Akses mikrofon diblokir — fitur suara akan merekam keheningan. Izinkan di System Settings › Privacy & Security › Microphone.',
     permMicRestricted: 'Akses mikrofon dibatasi kebijakan perangkat — kamu sendiri tidak bisa mengubahnya. Hubungi pengelola Mac ini.',
     macAccessibility: 'Aksesibilitas macOS',
