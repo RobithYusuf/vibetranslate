@@ -314,7 +314,13 @@ export function useSettings() {
 
   const save = useCallback(async () => {
     // Written to the OS credential store, deliberately NOT into the settings file below.
-    await saveAllApiKeys(apiKeys);
+    // A credential-store failure must not also lose the user's other settings (shortcuts,
+    // languages...): report it and carry on saving the file.
+    try {
+      await saveAllApiKeys(apiKeys);
+    } catch (e) {
+      console.error('[Settings] API keys not saved:', e);
+    }
     const settings = {
       licenseKey,
       licenseStatus,

@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.59',
+    date: '2026-10-01',
+    changes: [
+      'API keys are now kept in a single Keychain item: at most one password prompt if macOS ever asks again, and faster startup',
+      'If the Keychain cannot be read, your saved keys are never overwritten, and your other settings still save',
+    ],
+  },
+  {
     version: '1.0.58',
     date: '2026-10-01',
     changes: [
