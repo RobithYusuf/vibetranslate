@@ -77,7 +77,7 @@ function warnQuietMic(): void {
   quietMicWarnedAt = Date.now();
   void notify(
     'Your microphone barely hears you',
-    'Check System Settings › Sound › Input: pick your microphone and watch the level move while you speak. You can also choose the microphone in VibeTranslate › Settings › Voice.',
+    'Check System Settings › Sound › Input: pick your microphone and watch the level move while you speak. If the level does not move at all, restart your Mac: a stuck macOS audio system causes exactly this, and a restart clears it.',
   );
 }
 

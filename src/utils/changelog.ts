@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.62',
+    date: '2026-10-01',
+    changes: [
+      'A missing permission now shows as "Permission needed" in the status bar at the bottom of Settings, visible on every tab; one click jumps to it',
+      'When the microphone hears almost nothing, the hint now suggests restarting the Mac, which clears a stuck macOS audio system',
+    ],
+  },
+  {
     version: '1.0.61',
     date: '2026-10-01',
     changes: [

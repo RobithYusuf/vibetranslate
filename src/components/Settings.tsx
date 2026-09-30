@@ -206,6 +206,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     }
   }, [provider, serverAvailable, serverDefaultModel, serverModels, model, setModel]);
   const [activeTab, setActiveTab] = useState<TabType>('general');
+  const panelScrollRef = useRef<HTMLDivElement>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState<'translate' | 'popup' | 'terminal' | 'enhance' | 'voice' | 'voiceOriginal' | null>(null);
@@ -1093,7 +1094,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           )}
           {/* min-h-0: a flex child defaults to min-height:auto and would grow past the panel
               instead of scrolling. */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-6">
+          <div ref={panelScrollRef} className="flex-1 min-h-0 overflow-y-auto p-6">
           {activeTab === 'general' && (
             <div className="space-y-5 w-full">
               {permsNeedAttention && permissionsCard}
@@ -2453,6 +2454,19 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Always visible, whatever tab or scroll position: a missing permission is the one
+              thing that makes every shortcut silently do nothing. One click jumps to the card. */}
+          {permsNeedAttention && (
+            <button
+              onClick={() => {
+                setActiveTab('general');
+                requestAnimationFrame(() => panelScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' }));
+              }}
+              className="bg-amber-500 hover:bg-amber-400 text-black font-medium rounded px-1.5 transition-colors"
+            >
+              ⚠ {t('permBadge')}
+            </button>
+          )}
           <span className="text-yellow-200">{AI_PROVIDERS[provider].name.split(' ')[0]}</span>
           <span>{soundEnabled ? '🔊' : '🔇'}</span>
           <button
