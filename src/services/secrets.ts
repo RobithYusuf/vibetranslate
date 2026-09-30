@@ -13,9 +13,17 @@ const PROVIDERS: AIProvider[] = ['server', 'openai', 'openrouter', 'groq', 'gemi
 
 const keyFor = (provider: AIProvider) => `apikey-${provider}`;
 
+// What the credential store holds, as far as this window knows. Saves skip keys that did not
+// change: settings autosave on every edit, and rewriting all six items each time is what
+// turned one signature change into a string of Keychain password prompts (every write to an
+// item created by an older build asks). `undefined` = not known yet, so it is written.
+const known = new Map<AIProvider, string>();
+
 export async function getApiKey(provider: AIProvider): Promise<string | null> {
   try {
-    return await invoke<string | null>('secret_get', { key: keyFor(provider) });
+    const v = await invoke<string | null>('secret_get', { key: keyFor(provider) });
+    known.set(provider, v ?? '');
+    return v;
   } catch (e) {
     console.warn('[Secrets] read failed for', provider, e);
     return null;
@@ -24,6 +32,7 @@ export async function getApiKey(provider: AIProvider): Promise<string | null> {
 
 export async function setApiKey(provider: AIProvider, value: string | null): Promise<void> {
   await invoke('secret_set', { key: keyFor(provider), value: value ?? '' });
+  known.set(provider, value ?? '');
 }
 
 export async function loadAllApiKeys(): Promise<Record<string, string | null>> {
@@ -40,7 +49,9 @@ export async function saveAllApiKeys(keys: Record<string, string | null>): Promi
   // Sequential on purpose: some credential stores serialise writes anyway, and a partial
   // failure is easier to reason about than six racing ones.
   for (const p of PROVIDERS) {
-    await setApiKey(p, keys[p] ?? null);
+    const next = keys[p] ?? '';
+    if (known.has(p) && known.get(p) === next) continue; // unchanged: no Keychain round-trip
+    await setApiKey(p, next || null);
   }
 }
 

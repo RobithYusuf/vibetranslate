@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.55',
+    date: '2026-10-01',
+    changes: [
+      'Voice: on speakers that macOS cannot mute (monitor/HDMI, many USB and AirPlay outputs), background music is now silenced by turning the volume down, and restored afterwards. Music no longer drowns out your voice or turns up as "♪" in the text',
+      'Settings: Accessibility and Microphone are in one card that moves to the top while a permission is missing, with an "Allow microphone" button',
+      'Fewer Keychain password prompts: API keys are only written when they change',
+    ],
+  },
+  {
     version: '1.0.54',
     date: '2026-09-30',
     changes: [

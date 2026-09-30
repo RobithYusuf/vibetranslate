@@ -7,6 +7,30 @@ use std::process::Command;
 // the user wasn't already muting.
 #[cfg(target_os = "macos")]
 static PRIOR_MUTED: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+/// Set only when the output device could not be muted (HDMI, many USB/DAC outputs, AirPlay
+/// report no software mute) and the volume was turned to 0 instead: the level to put back.
+/// Without this fallback the mute "failed" silently on those devices, music kept playing into
+/// the microphone, and live dictation transcribed the song ("♪") instead of the user.
+#[cfg(target_os = "macos")]
+static PRIOR_VOLUME: std::sync::Mutex<Option<i64>> = std::sync::Mutex::new(None);
+
+/// Undo whatever this app did to the output: un-mute only if it was audible before we muted
+/// (never switch on sound the user had silenced), and restore a volume we zeroed. Caller holds
+/// AUDIO_OP.
+#[cfg(target_os = "macos")]
+fn restore_output_locked() {
+    let prior = PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let volume = PRIOR_VOLUME.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if prior == Some(false) {
+        let _ = Command::new("osascript").arg("-e").arg("set volume output muted false").output();
+    }
+    if let Some(v) = volume {
+        let _ = Command::new("osascript")
+            .arg("-e")
+            .arg(format!("set volume output volume {}", v.clamp(0, 100)))
+            .output();
+    }
+}
 
 /// Serialises every audio transition. PRIOR_MUTED and the machine's actual mute state are one
 /// piece of state, but they used to be updated through two separate short lock acquisitions
@@ -51,13 +75,50 @@ pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
                 // true` never ran and background audio simply kept playing. It failed silently
                 // because the exit status was ignored, which is the more important half of
                 // this fix: a broken script must never again read as "muted successfully".
-                let script = "set prev to (output muted of (get volume settings))\n\
-                              set volume output muted true\n\
-                              return prev";
+                // Every step is wrapped in try: on a device without software mute, `output muted`
+                // is "missing value" and setting it throws, which used to fail the whole script.
+                // Then, only if the mute did not take, fall back to volume 0.
+                let script = r#"set prevMuted to "?"
+set prevVol to -1
+try
+	set s to (get volume settings)
+	set prevMuted to ((output muted of s) as text)
+	set prevVol to (output volume of s)
+end try
+set didMute to false
+try
+	set volume output muted true
+	if (output muted of (get volume settings)) is true then set didMute to true
+end try
+set didZero to false
+if didMute is false then
+	try
+		if (prevVol as text) is not "missing value" and prevVol > 0 then
+			set volume output volume 0
+			set didZero to true
+		end if
+	end try
+end if
+return prevMuted & "|" & (prevVol as text) & "|" & (didMute as text) & "|" & (didZero as text)"#;
                 match Command::new("osascript").arg("-e").arg(script).output() {
                     Ok(out) if out.status.success() => {
-                        let prior = String::from_utf8_lossy(&out.stdout).trim() == "true";
-                        *PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(prior);
+                        let reply = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        let parts: Vec<&str> = reply.split('|').collect();
+                        let did_mute = parts.get(2) == Some(&"true");
+                        let did_zero = parts.get(3) == Some(&"true");
+                        if did_mute {
+                            let prior = parts.first() == Some(&"true");
+                            *PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(prior);
+                        } else if did_zero {
+                            // Holding a "mute" by volume: Some(true) marks it held without ever
+                            // un-muting on restore; the volume is what gets put back.
+                            *PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(true);
+                            let vol = parts.get(1).and_then(|v| v.trim().parse::<f64>().ok());
+                            *PRIOR_VOLUME.lock().unwrap_or_else(|e| e.into_inner()) =
+                                vol.map(|v| v.round() as i64);
+                        } else {
+                            return Err(format!("output device can be neither muted nor turned down ({reply})"));
+                        }
                     }
                     Ok(out) => {
                         // Nothing was muted, so claim nothing: leaving PRIOR_MUTED unset keeps
@@ -76,13 +137,7 @@ pub async fn set_audio_muted(mute: bool) -> Result<(), String> {
             // must be a no-op. Treating it as "unmute" un-muted machines the user had
             // deliberately silenced themselves: the first restore consumed Some(true) and
             // correctly left them muted, then the second saw None and turned their sound on.
-            let prior = PRIOR_MUTED
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
-            if prior == Some(false) {
-                let _ = Command::new("osascript").arg("-e").arg("set volume output muted false").output();
-            }
+            restore_output_locked();
         }
         Ok(())
     }
@@ -104,16 +159,7 @@ pub fn release_mute_if_held() {
     // mute was mid-flight, exit, and leave the orphaned osascript to mute the whole machine
     // after the app was gone.
     let _op = AUDIO_OP.lock().unwrap_or_else(|e| e.into_inner());
-    let prior = PRIOR_MUTED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    if prior == Some(false) {
-        let _ = Command::new("osascript")
-            .arg("-e")
-            .arg("set volume output muted false")
-            .output();
-    }
+    restore_output_locked();
 }
 
 #[cfg(not(target_os = "macos"))]

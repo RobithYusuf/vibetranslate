@@ -164,6 +164,8 @@ function cleanTranscript(data: { text?: string; segments?: WhisperSegment[] }): 
   } else {
     text = (data.text || '').trim();
   }
+  // Music-note tokens are what Whisper writes for background music, never speech.
+  text = text.replace(/[\u2669-\u266F\u{1F3B5}\u{1F3B6}\u{1F3BC}]/gu, ' ').replace(/\s{2,}/g, ' ').trim();
   if (!text || isHallucinationPhrase(text)) return '';
   return text;
 }

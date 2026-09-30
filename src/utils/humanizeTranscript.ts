@@ -23,8 +23,12 @@ const ALWAYS_CAPS = new Set([
   'vibetranslate',
 ]);
 
+// Music-note tokens. Recognisers trained on subtitles emit them for background music ("♪");
+// they are never words, and pasting "♪" into someone's chat is plainly wrong.
+const MUSIC_RE = /[\u2669-\u266F\u{1F3B5}\u{1F3B6}\u{1F3BC}]/gu;
+
 export function humanizeTranscript(raw: string, force = false): string {
-  const text = raw.trim();
+  const text = raw.replace(MUSIC_RE, ' ').replace(/\s{2,}/g, ' ').trim();
   if (!text) return '';
 
   // Judge by PROPORTION, not by "every single letter is capital". The recogniser is not

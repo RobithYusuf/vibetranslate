@@ -774,6 +774,95 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     },
   ];
 
+  // Accessibility + Microphone in one card. It sits at the top of General while something is
+  // missing (a user who never scrolls down otherwise only found out when shortcuts silently
+  // did nothing) and returns to the bottom once everything is granted. A microphone that was
+  // simply never asked is not "missing": most people grant it the first time they use voice.
+  const permsNeedAttention = isMac && !!perms && (
+    !perms.accessibility || perms.microphone === 'denied' || perms.microphone === 'restricted'
+  );
+  const micState = perms?.microphone;
+  const micOk = micState === 'authorized';
+  const micBad = micState === 'denied' || micState === 'restricted';
+  const requestMicrophone = async () => {
+    // Asking for the mic is what makes macOS show its permission prompt (and list the app in
+    // Privacy & Security). Close the stream at once: we only wanted the prompt.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((tr) => tr.stop());
+    } catch (err) {
+      console.warn('[Settings] microphone request failed:', err);
+    }
+  };
+  const permissionsCard = isMac ? (
+    <div className={`bg-[#252526] rounded-lg p-4 space-y-3 ${permsNeedAttention ? 'ring-1 ring-amber-500/40' : ''}`}>
+      {/* Accessibility */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2.5">
+          <span className={`w-6 h-6 rounded-md border grid place-items-center shrink-0 ${
+            perms?.accessibility ? 'bg-green-500/15 border-green-500/25' : 'bg-amber-500/15 border-amber-500/25'
+          }`}>
+            <Accessibility size={14} className={perms?.accessibility ? 'text-green-400' : 'text-amber-400'} />
+          </span>
+          <span className="text-[14px] font-medium text-white/80">{t('macAccessibility')}</span>
+          {perms && (
+            <span className={`ml-auto text-[10px] shrink-0 ${perms.accessibility ? 'text-green-400/90' : 'text-amber-400/90'}`}>
+              ● {perms.accessibility ? t('permGranted') : t('permMissing')}
+            </span>
+          )}
+        </div>
+        <p className="text-[12px] text-white/50">{t('macAccessibilityDesc')}</p>
+        {perms && !perms.accessibility && (
+          <p className="text-[12px] text-amber-400/80">{t('macAccessibilityHelp')}</p>
+        )}
+        <button
+          onClick={() => { void invoke('open_accessibility_settings').catch(() => {}); }}
+          className={perms?.accessibility
+            ? 'px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors'
+            : 'w-full px-3 py-2 text-[12px] bg-amber-600 hover:bg-amber-500 text-white rounded font-medium transition-colors'}
+        >
+          {t('openAccessibilitySettings')}
+        </button>
+      </div>
+
+      {/* Microphone */}
+      <div className="space-y-2 pt-3 border-t border-white/5">
+        <div className="flex items-center gap-2.5">
+          <span className={`w-6 h-6 rounded-md border grid place-items-center shrink-0 ${
+            micOk ? 'bg-green-500/15 border-green-500/25' : micBad ? 'bg-red-500/15 border-red-500/25' : 'bg-white/5 border-white/10'
+          }`}>
+            <Mic size={14} className={micOk ? 'text-green-400' : micBad ? 'text-red-400' : 'text-white/50'} />
+          </span>
+          <span className="text-[14px] font-medium text-white/80">{t('macMicrophone')}</span>
+          {perms && (
+            <span className={`ml-auto text-[10px] shrink-0 ${micOk ? 'text-green-400/90' : micBad ? 'text-red-400/90' : 'text-white/40'}`}>
+              ● {micOk ? t('permGranted') : micState === 'denied' ? t('permBlocked') : micState === 'restricted' ? t('permRestricted') : t('permNotAsked')}
+            </span>
+          )}
+        </div>
+        <p className="text-[12px] text-white/50">{t('macMicrophoneDesc')}</p>
+        {micState === 'denied' && <p className="text-[12px] text-red-400/90">{t('permMicDenied')}</p>}
+        {micState === 'restricted' && <p className="text-[12px] text-red-400/90">{t('permMicRestricted')}</p>}
+        {micState === 'denied' && (
+          <button
+            onClick={() => { void invoke('open_microphone_settings').catch(() => {}); }}
+            className="w-full px-3 py-2 text-[12px] bg-red-600/80 hover:bg-red-500 text-white rounded font-medium transition-colors"
+          >
+            {t('openMicrophoneSettings')}
+          </button>
+        )}
+        {perms && !micOk && !micBad && (
+          <button
+            onClick={() => { void requestMicrophone(); }}
+            className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
+          >
+            {t('allowMicrophone')}
+          </button>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="h-screen flex flex-col bg-[#1e1e1e] text-white">
       <Toaster position="top-center" />
@@ -904,7 +993,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           {/* Missing permissions, pinned ABOVE the scrolling content on every tab. The full
               card sits at the bottom of General, where a user who never scrolls that far
               only found out when shortcuts silently did nothing. One line per problem. */}
-          {isMac && perms && (!perms.accessibility || perms.microphone === 'denied' || perms.microphone === 'restricted') && (
+          {isMac && permsNeedAttention && activeTab !== 'general' && (
             <div role="alert" className="shrink-0 border-b border-amber-500/20 bg-amber-500/[0.08] px-6 py-2 space-y-1.5">
               {!perms.accessibility && (
                 <div className="flex items-center gap-2.5">
@@ -941,6 +1030,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           <div className="flex-1 min-h-0 overflow-y-auto p-6">
           {activeTab === 'general' && (
             <div className="space-y-5 w-full">
+              {permsNeedAttention && permissionsCard}
               {/* AI Provider & API Key — and the app-wide power switch, in this header.
                   It used to be a whole card of its own at the BOTTOM of the tab titled
                   "Translation Active": furthest from everything it controls, and the name
@@ -1637,54 +1727,9 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 </div>
               </div>
 
-              {/* macOS Accessibility - Only show on macOS */}
-              {isMac && (
-                <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-2.5">
-                    {/* A shield read as "security warning"; this is a permission the user
-                        GRANTS, and macOS labels it with the same accessibility mark. */}
-                    <span className={`w-6 h-6 rounded-md border grid place-items-center shrink-0 ${
-                      perms?.accessibility ? 'bg-green-500/15 border-green-500/25' : 'bg-amber-500/15 border-amber-500/25'
-                    }`}>
-                      <Accessibility size={14} className={perms?.accessibility ? 'text-green-400' : 'text-amber-400'} />
-                    </span>
-                    <span className="text-[14px] font-medium text-white/80">{t('macAccessibility')}</span>
-                    {perms && (
-                      <span className={`ml-auto text-[10px] shrink-0 ${perms.accessibility ? 'text-green-400/90' : 'text-amber-400/90'}`}>
-                        ● {perms.accessibility ? t('permGranted') : t('permMissing')}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[12px] text-white/50">{t('macAccessibilityDesc')}</p>
-                  {/* The old copy showed "not working? remove & re-add" permanently, which
-                      was wrong whenever the permission was fine. Show it only when it IS
-                      missing — and say why it goes missing, because with an unsigned build
-                      every update silently revokes it. */}
-                  {perms && !perms.accessibility && (
-                    <p className="text-[12px] text-amber-400/80">{t('macAccessibilityHelp')}</p>
-                  )}
-                  {perms?.microphone === 'denied' && (
-                    <p className="text-[12px] text-red-400/90">{t('permMicDenied')}</p>
-                  )}
-                  {perms?.microphone === 'restricted' && (
-                    <p className="text-[12px] text-red-400/90">{t('permMicRestricted')}</p>
-                  )}
-                  <button
-                    onClick={async () => {
-                      try {
-                        await invoke('open_accessibility_settings');
-                      } catch (err) {
-                        console.error('Failed to open accessibility settings:', err);
-                      }
-                    }}
-                    className={perms?.accessibility
-                      ? 'px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors'
-                      : 'w-full px-3 py-2 text-[12px] bg-amber-600 hover:bg-amber-500 text-white rounded font-medium transition-colors'}
-                  >
-                    {t('openAccessibilitySettings')}
-                  </button>
-                </div>
-              )}
+              {/* Permissions card: here at the bottom once everything is granted; it moves to
+                  the TOP of this tab while something is missing (see permsNeedAttention). */}
+              {!permsNeedAttention && permissionsCard}
               </div>
             </div>
           )}
