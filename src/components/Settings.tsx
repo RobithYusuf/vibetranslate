@@ -838,16 +838,23 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     !perms.accessibility || perms.microphone === 'denied' || perms.microphone === 'restricted'
   );
   const micState = perms?.microphone;
-  const micOk = micState === 'authorized';
+  // Rust reports "granted" (see permission_status); "authorized" is accepted too. Checking only
+  // "authorized" showed a granted mic as "Not asked yet" with an Allow button that did nothing.
+  const micOk = micState === 'granted' || micState === 'authorized';
   const micBad = micState === 'denied' || micState === 'restricted';
   const requestMicrophone = async () => {
     // Asking for the mic is what makes macOS show its permission prompt (and list the app in
-    // Privacy & Security). Close the stream at once: we only wanted the prompt.
+    // Privacy & Security). Native first; getUserMedia only as a fallback, closed at once since
+    // we only wanted the prompt. The card updates by itself via the permission polling.
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((tr) => tr.stop());
-    } catch (err) {
-      console.warn('[Settings] microphone request failed:', err);
+      await invoke('request_microphone_access');
+    } catch {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((tr) => tr.stop());
+      } catch (err) {
+        console.warn('[Settings] microphone request failed:', err);
+      }
     }
   };
   const permissionsCard = isMac ? (

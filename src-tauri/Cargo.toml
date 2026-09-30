@@ -1,6 +1,6 @@
 [package]
 name = "vibetranslate"
-version = "1.0.56"
+version = "1.0.57"
 edition = "2021"
 
 [build-dependencies]
@@ -37,6 +37,9 @@ windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsA
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
 objc = "0.2.7"
+# Objective-C blocks, for AVCaptureDevice's permission completion handler. Already in the tree
+# through cocoa (same 0.1.6), so this adds no crate.
+block = "0.1"
 # Global mouse-button hook (CGEventTap). All already in the tree via cocoa 0.26, so
 # pinning to the same minor adds no extra crate version.
 core-graphics = "0.25"

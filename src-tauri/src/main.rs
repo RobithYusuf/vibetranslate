@@ -92,6 +92,7 @@ fn main() {
             commands::play_sound,
             commands::open_accessibility_settings,
             commands::open_microphone_settings,
+            commands::request_microphone_access,
             commands::permission_status,
             mouse_hook::mouse_hook_active,
             mouse_hook::restart_mouse_hook,

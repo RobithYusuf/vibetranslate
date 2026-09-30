@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.57',
+    date: '2026-10-01',
+    changes: [
+      'Settings: an allowed microphone now shows as Granted. It wrongly showed "Not asked yet" with an Allow button that did nothing',
+      'The Allow microphone button now reliably shows the macOS permission prompt',
+    ],
+  },
+  {
     version: '1.0.56',
     date: '2026-10-01',
     changes: [

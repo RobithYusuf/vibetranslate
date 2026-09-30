@@ -1023,6 +1023,35 @@ pub fn permission_status() -> PermissionStatus {
     }
 }
 
+/// Ask macOS for microphone access NOW, so the permission prompt appears from Settings instead
+/// of in the middle of a first dictation. Native (AVCaptureDevice) rather than getUserMedia in
+/// the Settings webview, which can fail without ever showing the prompt. Does nothing visible
+/// when the grant was already decided either way; the Settings card handles those states.
+#[tauri::command]
+pub async fn request_microphone_access() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use block::ConcreteBlock;
+        use objc::runtime::{Object, BOOL, YES};
+        use objc::{msg_send, sel, sel_impl};
+        #[link(name = "AVFoundation", kind = "framework")]
+        extern "C" {
+            static AVMediaTypeAudio: *const Object;
+        }
+        // Class::get, not class!(): the macro panics on a missing class, and release builds
+        // abort on panic.
+        let Some(cls) = objc::runtime::Class::get("AVCaptureDevice") else {
+            return Err("AVCaptureDevice unavailable".into());
+        };
+        let handler = ConcreteBlock::new(|granted: BOOL| {
+            crate::diag::log("perm", if granted == YES { "microphone allowed from prompt" } else { "microphone refused from prompt" });
+        })
+        .copy();
+        let _: () = msg_send![cls, requestAccessForMediaType: AVMediaTypeAudio completionHandler: &*handler];
+    }
+    Ok(())
+}
+
 // Open macOS Accessibility Settings
 #[tauri::command]
 pub async fn open_accessibility_settings() -> Result<(), String> {
