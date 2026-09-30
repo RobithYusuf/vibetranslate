@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { diag, errorKind } from '@/services/diag';
 import { emit } from '@tauri-apps/api/event';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { useAppStore } from '@/stores/appStore';
@@ -54,6 +55,8 @@ async function waitClipboardChange(
 // session) so the user lands where the fix is.
 let accessibilityPaneOpened = false;
 async function reportFailure(context: 'Translation' | 'Enhance', msg: string): Promise<string> {
+  const st = useAppStore.getState();
+  diag('translate', `${context.toLowerCase()} failed: ${errorKind(msg)} provider=${st.provider} model=${st.provider === 'custom' ? 'custom' : st.model}`);
   let title = `${context} Failed`;
   let body = msg.substring(0, 120);
   let hint = 'Failed';

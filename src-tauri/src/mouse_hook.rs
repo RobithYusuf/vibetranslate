@@ -320,8 +320,14 @@ mod imp {
             if port.is_null() {
                 TAP_ACTIVE.store(false, Ordering::SeqCst);
                 STARTED.store(false, Ordering::SeqCst);
+                // Retried on every Settings focus until Accessibility is granted: log it once.
+                static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if !LOGGED.swap(true, Ordering::SeqCst) {
+                    crate::diag::log("mouse", "hook unavailable (Accessibility not granted?)");
+                }
                 return;
             }
+            crate::diag::log("mouse", "hook active");
 
             TAP_PORT.store(port, Ordering::SeqCst);
             let mach_port = CFMachPort::wrap_under_create_rule(port as _);
@@ -437,8 +443,9 @@ mod imp {
                     }
                     TAP_ACTIVE.store(false, Ordering::SeqCst);
                 }
-                Err(_) => {
+                Err(e) => {
                     TAP_ACTIVE.store(false, Ordering::SeqCst);
+                    crate::diag::log("mouse", &format!("hook failed: {e}"));
                 }
             }
             STARTED.store(false, Ordering::SeqCst);

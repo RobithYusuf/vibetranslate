@@ -11,6 +11,7 @@ mod mouse_hook;
 mod stt;
 mod stt_stream;
 mod mt;
+mod diag;
 
 use tauri_plugin_autostart::MacosLauncher;
 use plugins::mac_rounded_corners;
@@ -30,6 +31,11 @@ fn main() {
             Some(vec!["--minimized"]),
         ))
         .setup(|app| {
+            use tauri::Manager;
+            if let Ok(dir) = app.path().app_log_dir() {
+                diag::init(dir);
+            }
+            diag::log("app", &format!("start v{}", app.package_info().version));
             tray::setup_tray(app)?;
             // Start background app tracker
             keyboard::start_app_tracker();
@@ -70,6 +76,10 @@ fn main() {
             stt_stream::stream_stt_finish,
             stt_stream::stream_stt_cancel,
             stt_stream::stream_stt_commit,
+            diag::diag_log,
+            diag::diag_report,
+            diag::diag_clear,
+            diag::diag_open_folder,
             commands::resize_transcript_window,
             stt_stream::stream_stt_release,
             commands::show_popup,

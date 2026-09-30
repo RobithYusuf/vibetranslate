@@ -17,6 +17,7 @@ import { blobToPcm16kBase64 } from '@/utils/pcm';
 import type { VoiceStartPayload } from '@/hooks/useVoiceInput';
 import { applyVoiceCorrections } from '@/utils/voiceCorrections';
 import { notify } from '@/services/notify';
+import { diag, errorKind } from '@/services/diag';
 import logoMark from '@/assets/logo-mark.png';
 
 const EMPTY_BARS = new Array(VOICE_BAR_COUNT).fill(0);
@@ -66,6 +67,7 @@ async function noSpeechReason(): Promise<string> {
   // Exact digital silence: macOS reports the grant as fine but hands us a dead microphone.
   // Seen right after an update changed the app's signature; only re-granting fixes it.
   if (micDeliveredNoSignal()) {
+    diag('voice', 'mic delivered exact silence (permission tied to an old signature?)');
     void notify(
       'Microphone gives no audio',
       'macOS is blocking the microphone for VibeTranslate. Open System Settings › Privacy & Security › Microphone, turn VibeTranslate off and on again, then retry.',
@@ -126,6 +128,7 @@ export default function RecordingOverlay() {
   const sessionIdRef = useRef<number>(-1);         // id of the run we (last) began; blocks re-emit resurrection
   const finishedRef = useRef(false);              // true once a terminal state ran (blocks late process/double-finish)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // deferred hide_recording; cleared on next begin()
+  const recStartedAtRef = useRef(0);              // capture start, for the diagnostics duration
   const captureLiveRef = useRef(false);           // the recorder is actually capturing (set after startRecording)
   const pendingStopRef = useRef(false);           // a stop arrived during 'starting'; run it once capture is live
 
@@ -250,6 +253,7 @@ export default function RecordingOverlay() {
         if (op === 'word') ed.deleteWord();
         else if (op === 'all') ed.clearAll();
         else ed.undo();
+        diag('live', `edit ${op}`);
         publishView();
       }).catch((e) => { console.warn('[Voice] live edit failed:', e); });
       return editChain;
@@ -278,6 +282,8 @@ export default function RecordingOverlay() {
         announce('transcribing');
         const { blob, voicedMs, hadSpeech } = await stopRecording();
         if (sessionIdRef.current !== runId) return;
+        const tStt = performance.now();
+        diag('voice', `stop ${auto ? 'auto' : 'manual'} rec=${recStartedAtRef.current ? ((Date.now() - recStartedAtRef.current) / 1000).toFixed(1) : '?'}s audio=${Math.round(blob.size / 1024)}KB voiced=${Math.round(voicedMs)}ms`);
         void restoreAudio(); // recording done -> restore audio right away
         // The transcript window's job ended with the recording. Leaving it up while the paste
         // pipeline runs made the whole feature look like it was still listening.
@@ -292,6 +298,7 @@ export default function RecordingOverlay() {
         // real speech when the user hit Done before Silero closed the segment.)
         if (auto && (!hadSpeech || voicedMs < 400)) {
           const reason = await noSpeechReason();
+          diag('voice', `no speech (auto): ${reason}`);
           if (stale()) return;
           announce('error', reason);
           finishSession('error');
@@ -351,6 +358,7 @@ export default function RecordingOverlay() {
             } catch (e) {
               if (controller.signal.aborted) throw e; // user cancelled: not a fallback case
               console.warn('[Voice] live: whole-recording pass failed, keeping live text:', e);
+              diag('stt', `live: whole-recording pass skipped (${errorKind(String(e))}), kept live text`);
             } finally {
               clearTimeout(timer);
               controller.signal.removeEventListener('abort', onAbort);
@@ -390,6 +398,7 @@ export default function RecordingOverlay() {
           });
         }
         if (stale()) return;
+        diag('stt', `${liveSession?.isActive ? 'live' : ['omnilingual-300m', 'whisper-turbo', 'parakeet-v3'].includes(config.voiceSttEngine) ? 'offline' : 'online'} ok ${Math.round(performance.now() - tStt)}ms chars=${rawTranscript.length}`);
         // User correction dictionary: deterministic fixes for habitual mis-hearings, applied to
         // the transcript BEFORE translation/pasting (voice only).
         const transcript = config.voiceCorrections?.length
@@ -449,6 +458,7 @@ export default function RecordingOverlay() {
         // nothing, and played the success chime.
         if (!out.trim()) {
           const reason = await noSpeechReason();
+          diag('voice', `empty result: ${reason}`);
           if (stale()) return;
           announce('error', reason);
           finishSession('error');
@@ -460,6 +470,7 @@ export default function RecordingOverlay() {
         await sleep(120);
         await simulatePasteToApp(targetAppRef.current || '', targetPosRef.current);
 
+        diag('voice', `pasted chars=${out.length} mode=${modeRef.current}`);
         if (config.voiceSoundEnabled) { try { await invoke('play_sound', { soundType: 'success' }); } catch { /* */ } }
         announce('done');
         finishSession('done');
@@ -471,10 +482,12 @@ export default function RecordingOverlay() {
           || (err instanceof DOMException && err.name === 'AbortError')
           || /cancel|abort/i.test(msg);
         if (cancelled) {
+          diag('voice', 'cancelled');
           console.log('[Voice] Cancelled');
           cancelRecording();
           finishSession('cancel');
         } else if (/no speech/i.test(msg)) {
+          diag('voice', 'no speech (server)');
           // Server 422 / empty transcript: same silent-mic question as the other no-speech exits.
           cancelRecording();
           const reason = await noSpeechReason();
@@ -483,6 +496,7 @@ export default function RecordingOverlay() {
           finishSession('error');
         } else {
           console.error('[Voice] Failed:', msg);
+          diag('voice', `failed: ${errorKind(msg)}`);
           cancelRecording();
           announce('error', reportVoiceError(msg));
           finishSession('error');
@@ -569,6 +583,8 @@ export default function RecordingOverlay() {
       // Live dictation. All the startup/queueing subtleties live in LiveSession — see the
       // header comment there before changing the ordering here.
       const wantLive = !!payload.config.voiceLiveMode;
+      const tBegin = Date.now();
+      diag('voice', `start mode=${payload.mode} engine=${payload.config.voiceSttEngine} live=${wantLive} hold=${!!payload.config.holdToTalk} autostop=${payload.config.voiceAutoStop}`);
       // Dev scaffolding: Vite replaces import.meta.env.DEV with a literal, so this whole line
       // is removed from production bundles rather than firing an IPC call users never see the
       // output of.
@@ -641,13 +657,16 @@ export default function RecordingOverlay() {
         // Capture is genuinely running now — this is the honest moment to invite speech, and
         // the elapsed timer should count from here rather than from the keypress.
         captureLiveRef.current = true;
+        diag('voice', `capturing after ${Date.now() - tBegin}ms`);
         announce('recording');
-        setRecStartedAt(Date.now()); // fresh ticker for THIS session (see the ticker effect below)
+        recStartedAtRef.current = Date.now();
+        setRecStartedAt(recStartedAtRef.current); // fresh ticker for THIS session (see the ticker effect below)
         if (pendingStopRef.current) { pendingStopRef.current = false; void process(); }
       } catch (err) {
         if (sessionIdRef.current !== mySession || cancelledRef.current) return; // superseded or cancelled: not an error
         const msg = err instanceof Error ? err.message : String(err);
         console.error('[Voice] Could not start recording:', msg);
+        diag('voice', `could not start recording: ${errorKind(msg)}`);
         cancelRecording();
         announce('error', reportVoiceError(msg));
         finishSession('error');

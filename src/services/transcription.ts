@@ -5,6 +5,7 @@ import { AIProvider } from '@/types';
 import { getDeviceId } from '@/utils/deviceId';
 import { STT_PROVIDERS } from '@/utils/constants';
 import APP_CONFIG from '@/config';
+import { diag } from '@/services/diag';
 
 interface TranscribeOptions {
   blob: Blob;
@@ -106,6 +107,7 @@ async function hedgedFetch(
     const hedge = () => {
       if (hedged || settled) return;
       hedged = true;
+      diag('stt', 'slow or failed connection, retrying on a fresh one');
       attempt();
     };
     const onOuterAbort = () => finish(null, () => reject(new DOMException('Aborted', 'AbortError')));
@@ -183,6 +185,7 @@ async function transcribeViaServer(
   if (language && language !== 'auto') form.append('language', language);
   if (prompt && prompt.trim()) form.append('prompt', prompt.trim());
 
+  const t0 = performance.now();
   let response: Response;
   try {
     response = await hedgedFetch(
@@ -198,8 +201,12 @@ async function transcribeViaServer(
     );
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') throw new Error('Transcription cancelled');
+    diag('stt', `server unreachable after ${Math.round(performance.now() - t0)}ms`);
     throw new Error(`Could not reach transcription server: ${err instanceof Error ? err.message : String(err)}`);
   }
+  // Server-Timing carries the server's own stages and which model answered: together with the
+  // round-trip it says whether a slow result was the network, the quota lookup or the model.
+  diag('stt', `server ${response.status} ${Math.round(performance.now() - t0)}ms ${(response.headers.get('server-timing') || '').replace(/\s+/g, ' ')}`);
 
   if (!response.ok) {
     let detail = '';

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { diag, errorKind } from '@/services/diag';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { useAppStore } from '@/stores/appStore';
@@ -31,6 +32,7 @@ export function useUpdater(enabled: boolean) {
       setError(null);
       setPhase('checking');
       const res = await check();
+      diag('update', res?.available ? `available ${res.currentVersion} -> ${res.version}${manual ? ' (manual)' : ''}` : `up to date${manual ? ' (manual)' : ''}`);
       if (res?.available) {
         // Honor "skip this version" on the AUTOMATIC check only; a manual "Check for
         // updates" always shows the result (read fresh so it's never a stale closure).
@@ -47,6 +49,7 @@ export function useUpdater(enabled: boolean) {
       // Network hiccup / dev build / endpoint down: stay quiet on the automatic check,
       // surface only when the user asked explicitly.
       console.warn('[Updater] check failed:', e);
+      diag('update', `check failed: ${errorKind(e instanceof Error ? e.message : String(e))}`);
       setError(e instanceof Error ? e.message : String(e));
       setPhase(manual ? 'error' : 'idle');
       return false;
@@ -90,6 +93,7 @@ export function useUpdater(enabled: boolean) {
       await relaunch();
     } catch (e) {
       console.error('[Updater] install failed:', e);
+      diag('update', `install failed: ${errorKind(e instanceof Error ? e.message : String(e))}`);
       setError(e instanceof Error ? e.message : String(e));
       setPhase('error');
       installingRef.current = false; // allow a retry after a failed download/install

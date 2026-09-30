@@ -106,6 +106,10 @@ return prevMuted & "|" & (prevVol as text) & "|" & (didMute as text) & "|" & (di
                         let parts: Vec<&str> = reply.split('|').collect();
                         let did_mute = parts.get(2) == Some(&"true");
                         let did_zero = parts.get(3) == Some(&"true");
+                        crate::diag::log(
+                            "audio",
+                            if did_mute { "mute ok" } else if did_zero { "mute unsupported by output device, volume set to 0" } else { "mute failed: output can be neither muted nor turned down" },
+                        );
                         if did_mute {
                             let prior = parts.first() == Some(&"true");
                             *PRIOR_MUTED.lock().unwrap_or_else(|e| e.into_inner()) = Some(prior);

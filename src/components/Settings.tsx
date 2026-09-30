@@ -3,7 +3,7 @@ import { warmLive, releaseLive } from '@/services/sttStream';
 import { 
   Key, Languages, Keyboard, Sparkles, Copy, Globe, Accessibility,
   Volume2, Loader2, CheckCircle, XCircle, BookOpen, MessageSquare, MousePointer, AlertTriangle, Mic, Palette, ChevronRight, RefreshCw, X,
-  Gift, HardDrive, Lock, Cloud, Download
+  Gift, HardDrive, Lock, Cloud, Download, Bug
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useSettings } from '@/hooks/useSettings';
@@ -20,6 +20,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
 import { translateText, fetchModels } from '@/services/openai';
 import APP_CONFIG from '@/config';
+import { diag, diagReport, diagClear, diagOpenFolder } from '@/services/diag';
+import { getDeviceId } from '@/utils/deviceId';
 import Toggle from './Toggle';
 import Select from './Select';
 import { useI18n, UI_LANGUAGES, Language } from '@/i18n';
@@ -254,6 +256,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
   useEffect(() => {
     if (navigator.platform.toUpperCase().indexOf('MAC') < 0) return;
     let lastAx: boolean | null = null;
+    let lastMic: string | null = null;
     const read = () => {
       void invoke<{ accessibility: boolean; microphone: string }>('permission_status')
         .then((p) => {
@@ -262,7 +265,11 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           setPerms((prev) => (prev && prev.accessibility === p.accessibility && prev.microphone === p.microphone ? prev : p));
           // Granted just now: bring the mouse-shortcut hook up without waiting for a relaunch.
           if (lastAx === false && p.accessibility) void invoke('restart_mouse_hook').catch(() => {});
+          if (lastAx !== p.accessibility || lastMic !== p.microphone) {
+            diag('perm', `accessibility=${p.accessibility ? 'granted' : 'missing'} mic=${p.microphone}`);
+          }
           lastAx = p.accessibility;
+          lastMic = p.microphone;
         })
         .catch(() => {});
     };
@@ -773,6 +780,55 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
       ]
     },
   ];
+
+  // Diagnostics: copy or send the safe event log (see src-tauri/src/diag.rs).
+  const [diagNote, setDiagNote] = useState('');
+  const [diagState, setDiagState] = useState<'idle' | 'sending' | 'copied' | 'failed'>('idle');
+  const [diagRefId, setDiagRefId] = useState('');
+  const diagHeader = () => {
+    const st = useAppStore.getState();
+    return [
+      `provider=${st.provider} engine=${st.voiceSttEngine} live=${st.voiceLiveMode} hold=${st.voiceHoldToTalk} autostop=${st.voiceAutoStop}`,
+      `lang=${st.sourceLang}->${st.targetLang} ui=${st.uiLanguage}`,
+      perms ? `accessibility=${perms.accessibility ? 'granted' : 'missing'} mic=${perms.microphone}` : '',
+    ].filter(Boolean).join('\n');
+  };
+  const copyDiagnostics = async () => {
+    try {
+      const report = await diagReport(diagHeader());
+      await navigator.clipboard.writeText(diagNote.trim() ? `Note: ${diagNote.trim()}\n${report}` : report);
+      setDiagState('copied');
+      setTimeout(() => setDiagState('idle'), 2000);
+    } catch {
+      setDiagState('failed');
+    }
+  };
+  const sendDiagnostics = async () => {
+    setDiagState('sending');
+    setDiagRefId('');
+    // Manual timeout: AbortSignal.timeout() is missing from the WebKit on older macOS.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const report = await diagReport(diagHeader());
+      const res = await fetch(`${APP_CONFIG.API_URL}/api/diagnostics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() },
+        body: JSON.stringify({ report, note: diagNote.trim() }),
+        signal: ctrl.signal,
+      });
+      const data = await res.json().catch(() => ({})) as { id?: string };
+      if (!res.ok || !data.id) throw new Error(`HTTP ${res.status}`);
+      setDiagRefId(data.id);
+      setDiagNote('');
+      setDiagState('idle');
+    } catch (err) {
+      console.warn('[Diagnostics] send failed:', err);
+      setDiagState('failed');
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   // Accessibility + Microphone in one card. It sits at the top of General while something is
   // missing (a user who never scrolls down otherwise only found out when shortcuts silently
@@ -2045,6 +2101,58 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
 
           {activeTab === 'feedback' && (
             <div className="space-y-5 w-full">
+              {/* Diagnostics: report a problem with the safe event log. */}
+              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-rose-500/20 rounded">
+                    <Bug size={18} className="text-rose-400" />
+                  </div>
+                  <div>
+                    <span className="text-[14px] text-white/80 block">{t('diagTitle')}</span>
+                    <span className="text-[12px] text-white/40">{t('diagDesc')}</span>
+                  </div>
+                </div>
+                <textarea
+                  value={diagNote}
+                  onChange={(e) => setDiagNote(e.target.value.slice(0, 2000))}
+                  placeholder={t('diagNotePlaceholder')}
+                  rows={2}
+                  className="w-full px-3 py-2 text-[13px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-md text-white/80 placeholder:text-white/30 focus:outline-none focus:border-[#007acc] resize-none"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => { void sendDiagnostics(); }}
+                    disabled={diagState === 'sending'}
+                    className="px-3 py-1.5 text-[12px] font-medium bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-50 text-white rounded transition-colors"
+                  >
+                    {diagState === 'sending' ? t('diagSending') : t('diagSend')}
+                  </button>
+                  <button
+                    onClick={() => { void copyDiagnostics(); }}
+                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
+                  >
+                    {diagState === 'copied' ? t('diagCopied') : t('diagCopy')}
+                  </button>
+                  <button
+                    onClick={() => { void diagOpenFolder().catch(() => {}); }}
+                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
+                  >
+                    {t('diagOpenFolder')}
+                  </button>
+                  <button
+                    onClick={() => { void diagClear().catch(() => {}); setDiagRefId(''); }}
+                    className="px-3 py-1.5 text-[12px] text-white/50 hover:text-white/80 rounded transition-colors"
+                  >
+                    {t('diagClear')}
+                  </button>
+                </div>
+                {diagRefId && (
+                  <p className="text-[12px] text-green-400/90">
+                    {t('diagSent')} <span className="font-mono font-semibold select-all">{diagRefId}</span>
+                  </p>
+                )}
+                {diagState === 'failed' && <p className="text-[12px] text-amber-400/90">{t('diagSendFailed')}</p>}
+              </div>
               {/* Sound */}
               <div className="bg-[#252526] rounded-lg p-4">
                 <div className="flex items-center justify-between">

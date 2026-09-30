@@ -10,6 +10,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.56',
+    date: '2026-10-01',
+    changes: [
+      'New Diagnostics section (Settings › Feedback): send a short log to the developer with one click and get a reference number, or copy it. It never contains what you say or translate, your clipboard, or API keys',
+    ],
+  },
+  {
     version: '1.0.55',
     date: '2026-10-01',
     changes: [
