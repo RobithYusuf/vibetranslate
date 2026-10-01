@@ -39,7 +39,7 @@ function shortVoiceError(msg: string): string {
   if (/no speech/i.test(msg)) return 'No speech detected';
   if (/no audio/i.test(msg)) return 'No audio captured';
   if (/too large|too long/i.test(msg)) return 'Recording too long';
-  if (/busy|429|rate/i.test(msg)) return 'Server busy — retry';
+  if (/busy|429|rate/i.test(msg)) return 'Server busy — try again';
   if (/unreachable|fetch|network|load failed/i.test(msg)) return 'Server unreachable';
   if (/permission|denied/i.test(msg)) return 'Mic permission needed';
   if (/no microphone|not found/i.test(msg)) return 'No microphone found';
@@ -91,18 +91,18 @@ async function noSpeechReason(): Promise<string> {
       'macOS is blocking the microphone for VibeTranslate. Open System Settings › Privacy & Security › Microphone, turn VibeTranslate off and on again, then retry.',
     );
     void invoke('open_microphone_settings').catch(() => {});
-    return 'Mic permission blocked — re-allow';
+    return 'Mic blocked — allow it again';
   }
   if (micHearsNothing()) {
     diag('voice', 'microphone heard almost nothing (wrong input device or input volume?)');
     warnQuietMic();
-    return 'Mic hears almost nothing — check input';
+    return 'Mic hears nothing — check input';
   }
   try {
     const p = await invoke<{ microphone: string }>('permission_status');
-    if (p.microphone === 'denied') return 'Microphone blocked — re-grant it in System Settings';
-    if (p.microphone === 'restricted') return 'Microphone restricted by device policy';
-    if (p.microphone === 'undetermined') return 'Microphone permission not granted yet';
+    if (p.microphone === 'denied') return 'Mic blocked — allow in Settings';
+    if (p.microphone === 'restricted') return 'Mic blocked by device policy';
+    if (p.microphone === 'undetermined') return 'Allow the mic, then retry';
   } catch { /* status is a nicety; never let it swallow the real outcome */ }
   return 'No speech detected';
 }

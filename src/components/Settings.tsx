@@ -1337,25 +1337,25 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 </h4>
                 <div className="grid gap-2 text-[12px]">
                   <div className="flex items-center justify-between">
-                    <span className="text-white/60">{enhanceEnabled ? 'Enhance & Replace' : 'Translate & Replace'}</span>
+                    <span className="text-white/60">{enhanceEnabled ? 'Enhance & replace' : t('translateReplace')}</span>
                     <code className="px-2 py-0.5 bg-blue-500/20 border border-blue-500/30 rounded text-blue-300 text-[11px]">{formatShortcut(shortcut)}</code>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-white/60">{enhanceEnabled ? 'Enhance & Popup' : 'Translate & Popup'}</span>
+                    <span className="text-white/60">{enhanceEnabled ? 'Enhance in a popup' : t('translatePopup')}</span>
                     <code className="px-2 py-0.5 bg-green-500/20 border border-green-500/30 rounded text-green-300 text-[11px]">{formatShortcut(popupShortcut)}</code>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-white/60">{enhanceEnabled ? 'CLI Enhance (Replace)' : 'CLI Translate (Replace)'}</span>
+                    <span className="text-white/60">{enhanceEnabled ? 'CLI enhance (replace)' : t('terminalMode')}</span>
                     <code className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-amber-300 text-[11px]">{formatShortcut(terminalShortcut)}</code>
                   </div>
                   {voiceEnabled && (
                     <>
                       <div className="flex items-center justify-between">
-                        <span className="text-white/60">Voice → Original</span>
+                        <span className="text-white/60">{t('voiceOriginalLabel')}</span>
                         <code className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-cyan-300 text-[11px]">{formatShortcut(voiceOriginalShortcut)}</code>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-white/60">Voice → Translate</span>
+                        <span className="text-white/60">{t('voiceTranslateLabel')}</span>
                         <code className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/30 rounded text-cyan-300 text-[11px]">{formatShortcut(voiceShortcut)}</code>
                       </div>
                     </>
@@ -2117,58 +2117,6 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
 
           {activeTab === 'feedback' && (
             <div className="space-y-5 w-full">
-              {/* Diagnostics: report a problem with the safe event log. */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-rose-500/20 rounded">
-                    <Bug size={18} className="text-rose-400" />
-                  </div>
-                  <div>
-                    <span className="text-[14px] text-white/80 block">{t('diagTitle')}</span>
-                    <span className="text-[12px] text-white/40">{t('diagDesc')}</span>
-                  </div>
-                </div>
-                <textarea
-                  value={diagNote}
-                  onChange={(e) => setDiagNote(e.target.value.slice(0, 2000))}
-                  placeholder={t('diagNotePlaceholder')}
-                  rows={2}
-                  className="w-full px-3 py-2 text-[13px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-md text-white/80 placeholder:text-white/30 focus:outline-none focus:border-[#007acc] resize-none"
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => { void sendDiagnostics(); }}
-                    disabled={diagState === 'sending'}
-                    className="px-3 py-1.5 text-[12px] font-medium bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-50 text-white rounded transition-colors"
-                  >
-                    {diagState === 'sending' ? t('diagSending') : t('diagSend')}
-                  </button>
-                  <button
-                    onClick={() => { void copyDiagnostics(); }}
-                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
-                  >
-                    {diagState === 'copied' ? t('diagCopied') : t('diagCopy')}
-                  </button>
-                  <button
-                    onClick={() => { void diagOpenFolder().catch(() => {}); }}
-                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
-                  >
-                    {t('diagOpenFolder')}
-                  </button>
-                  <button
-                    onClick={() => { void diagClear().catch(() => {}); setDiagRefId(''); }}
-                    className="px-3 py-1.5 text-[12px] text-white/50 hover:text-white/80 rounded transition-colors"
-                  >
-                    {t('diagClear')}
-                  </button>
-                </div>
-                {diagRefId && (
-                  <p className="text-[12px] text-green-400/90">
-                    {t('diagSent')} <span className="font-mono font-semibold select-all">{diagRefId}</span>
-                  </p>
-                )}
-                {diagState === 'failed' && <p className="text-[12px] text-amber-400/90">{t('diagSendFailed')}</p>}
-              </div>
               {/* Sound */}
               <div className="bg-[#252526] rounded-lg p-4">
                 <div className="flex items-center justify-between">
@@ -2251,13 +2199,57 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 </button>
               </div>
 
-              {/* Info Box */}
-              <div className="bg-[#252526] rounded-lg p-4 text-[12px] text-white/50">
-                <p className="font-medium text-white/70 mb-2">{t('recommendation')}</p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li><strong className="text-white/70">{t('soundOn')}</strong> - {t('soundOnDesc')}</li>
-                  <li><strong className="text-white/70">{t('loadingOn')}</strong> - {t('loadingOnDesc')}</li>
-                </ul>
+              {/* Diagnostics: report a problem with the safe event log. */}
+              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-rose-500/20 rounded">
+                    <Bug size={18} className="text-rose-400" />
+                  </div>
+                  <div>
+                    <span className="text-[14px] text-white/80 block">{t('diagTitle')}</span>
+                    <span className="text-[12px] text-white/40">{t('diagDesc')}</span>
+                  </div>
+                </div>
+                <textarea
+                  value={diagNote}
+                  onChange={(e) => setDiagNote(e.target.value.slice(0, 2000))}
+                  placeholder={t('diagNotePlaceholder')}
+                  rows={2}
+                  className="w-full px-3 py-2 text-[13px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-md text-white/80 placeholder:text-white/30 focus:outline-none focus:border-[#007acc] resize-none"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => { void sendDiagnostics(); }}
+                    disabled={diagState === 'sending'}
+                    className="px-3 py-1.5 text-[12px] font-medium bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-50 text-white rounded transition-colors"
+                  >
+                    {diagState === 'sending' ? t('diagSending') : t('diagSend')}
+                  </button>
+                  <button
+                    onClick={() => { void copyDiagnostics(); }}
+                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
+                  >
+                    {diagState === 'copied' ? t('diagCopied') : t('diagCopy')}
+                  </button>
+                  <button
+                    onClick={() => { void diagOpenFolder().catch(() => {}); }}
+                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
+                  >
+                    {t('diagOpenFolder')}
+                  </button>
+                  <button
+                    onClick={() => { void diagClear().catch(() => {}); setDiagRefId(''); }}
+                    className="px-3 py-1.5 text-[12px] text-white/50 hover:text-white/80 rounded transition-colors"
+                  >
+                    {t('diagClear')}
+                  </button>
+                </div>
+                {diagRefId && (
+                  <p className="text-[12px] text-green-400/90">
+                    {t('diagSent')} <span className="font-mono font-semibold select-all">{diagRefId}</span>
+                  </p>
+                )}
+                {diagState === 'failed' && <p className="text-[12px] text-amber-400/90">{t('diagSendFailed')}</p>}
               </div>
             </div>
           )}

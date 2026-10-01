@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.64',
+    date: '2026-10-01',
+    changes: [
+      'Clearer, shorter wording throughout Settings and the voice popup, in English and Indonesian',
+      'Each feature now has one name everywhere, such as "Voice → translation" and "Voice → text"',
+      'Feedback tab: Diagnostics moved to the bottom, and the redundant recommendation box was removed',
+    ],
+  },
+  {
     version: '1.0.63',
     date: '2026-10-01',
     changes: [
