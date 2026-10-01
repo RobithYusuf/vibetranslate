@@ -211,7 +211,7 @@ export default function RecordingOverlay() {
     if (visual !== 'done') {
       void invoke('restore_focus_to_app', { app: targetAppRef.current || '' }).catch(() => {});
     }
-    const delay = visual === 'error' ? 2600 : visual === 'done' ? 1100 : 0;
+    const delay = visual === 'error' ? 2600 : 0;
     // Track the hide timer so a fresh begin() can cancel it — otherwise a stale timer
     // from this (finishing) session can hide the NEXT session's overlay mid-recording.
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -505,14 +505,19 @@ export default function RecordingOverlay() {
         }
 
         announce('pasting');
+        // The live transcript panel has done its job: drop it before the paste so the text
+        // lands in the target with nothing of ours sitting over it.
+        void invoke('hide_transcript').catch(() => { /* cosmetic */ });
         await setClipboardText(out);
-        await sleep(120);
+        await sleep(50); // the clipboard write is synchronous; this only lets the pasteboard settle
         await simulatePasteToApp(targetAppRef.current || '', targetPosRef.current);
 
         diag('voice', `pasted chars=${out.length} mode=${modeRef.current}`);
-        if (config.voiceSoundEnabled) { try { await invoke('play_sound', { soundType: 'success' }); } catch { /* */ } }
+        // The text appearing IS the confirmation: hide the pill at once (finishSession 'done'
+        // has no linger) and let the chime play on its own instead of waiting for it.
         announce('done');
         finishSession('done');
+        if (config.voiceSoundEnabled) void invoke('play_sound', { soundType: 'success' }).catch(() => { /* */ });
       } catch (err) {
         // A newer session owns the recorder and the overlay now: touching either would end it.
         if (sessionIdRef.current !== runId) return;

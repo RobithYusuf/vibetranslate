@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Listener, Manager, Runtime, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Listener, Runtime,
 };
 
 // Current shortcut set + which optional features are on. Sent from the frontend (App.tsx)
@@ -47,18 +47,7 @@ fn acc(s: &str) -> Option<&str> {
 }
 
 fn show_settings<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    } else {
-        let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
-            .title("VibeTranslate")
-            .inner_size(850.0, 500.0)
-            .resizable(true)
-            .center()
-            .build();
-    }
+    crate::commands::reveal_settings(app);
 }
 
 // Build the tray menu: an app-name header, then each feature with its shortcut shown as the

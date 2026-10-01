@@ -124,6 +124,13 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app, event| {
+            // Clicking the Dock icon while no window is visible. Closing Settings only hides
+            // it, so without this the Dock click did nothing and the app looked stuck.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                commands::reveal_settings(_app);
+                return;
+            }
             // Exits that go through Tauri's own path — the macOS menu's Cmd+Q, an OS
             // shutdown — never reach quit_app or the tray handler, and both exist to
             // restore the system mute a voice session may be holding. Without this, a

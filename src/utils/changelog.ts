@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.66',
+    date: '2026-10-01',
+    changes: [
+      'macOS: clicking the Dock icon or the menu-bar icon now always brings Settings back after you close it',
+      'Voice: the popup disappears as soon as your text is pasted, so nothing covers what you just wrote',
+    ],
+  },
+  {
     version: '1.0.65',
     date: '2026-10-01',
     changes: [

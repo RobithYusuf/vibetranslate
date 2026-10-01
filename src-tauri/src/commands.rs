@@ -191,29 +191,39 @@ pub fn quit_app(app: AppHandle) {
     std::process::exit(0);
 }
 
+/// Bring Settings to the front from anywhere: the tray icon, the tray menu, a Dock click
+/// (RunEvent::Reopen) or the frontend.
+///
+/// The window is only ever HIDDEN on close (see main.rs), so it already exists. Showing it is
+/// not enough on macOS: an app that is not active gets its window ordered in BEHIND the app
+/// the user is in, so the click looked like it did nothing ("sometimes it opens, sometimes
+/// not"). Activate first, then show and focus, all on the main thread where AppKit expects it.
+pub fn reveal_settings<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        #[cfg(target_os = "macos")]
+        activate_app();
+        if let Some(window) = handle.get_webview_window("settings") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        } else {
+            let _ = WebviewWindowBuilder::new(&handle, "settings", WebviewUrl::App("index.html".into()))
+                .title("VibeTranslate")
+                .inner_size(850.0, 500.0)
+                .resizable(true)
+                // Same floor as the config window: below ~720px the settings grid collapses into
+                // overlapping columns.
+                .min_inner_size(720.0, 480.0)
+                .center()
+                .build();
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn show_settings_window(app: AppHandle) -> Result<(), String> {
-    // Make sure the app itself is foreground + unhidden first, so opening from the tray always
-    // works even if the app was left in a background/deactivated state (e.g. after a voice cancel).
-    #[cfg(target_os = "macos")]
-    activate_app();
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.unminimize();
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-    } else {
-        WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("index.html".into()))
-            .title("VibeTranslate")
-            .inner_size(850.0, 500.0)
-            .resizable(true)
-            // Same floor as the config window: below ~720px the settings grid collapses into
-            // overlapping columns, and idly dragging an edge produced a squashed app that
-            // read as broken rather than resized.
-            .min_inner_size(720.0, 480.0)
-            .center()
-            .build()
-            .map_err(|e| e.to_string())?;
-    }
+    reveal_settings(&app);
     Ok(())
 }
 
