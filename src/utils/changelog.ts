@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.65',
+    date: '2026-10-01',
+    changes: [
+      'Every Settings tab now uses the same card layout: same icons, titles, spacing and buttons',
+      'Updates download through our own server, so they no longer stall at "Starting…"',
+      'If an update download is slow, the app says so and offers the manual download',
+    ],
+  },
+  {
     version: '1.0.64',
     date: '2026-10-01',
     changes: [

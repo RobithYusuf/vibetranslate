@@ -7,6 +7,7 @@ interface UpdateModalProps {
   phase: UpdatePhase;
   info: UpdateInfo | null;
   progress: number; // 0..1
+  stalled?: boolean; // no bytes for 30 s
   error: string | null;
   onInstall: () => void;
   onDismiss: () => void;
@@ -17,7 +18,7 @@ interface UpdateModalProps {
 // Confirm-before-install update dialog. Never installs silently — the user sees the
 // new version + release notes and decides. Shows download progress, then an
 // "installing / will restart" state.
-export default function UpdateModal({ phase, info, progress, error, onInstall, onDismiss, onRetry, onSkip }: UpdateModalProps) {
+export default function UpdateModal({ phase, info, progress, stalled, error, onInstall, onDismiss, onRetry, onSkip }: UpdateModalProps) {
   const { t } = useI18n();
   const [showNotes, setShowNotes] = useState(false);
   const visible = phase === 'available' || phase === 'downloading' || phase === 'installing' || phase === 'error';
@@ -93,6 +94,11 @@ export default function UpdateModal({ phase, info, progress, error, onInstall, o
                   <div className="h-full bg-cyan-500 transition-[width] duration-200" style={{ width: `${pct || 4}%` }} />
                 </div>
                 <p className="mt-2 text-[12px] text-white/50 text-center">{pct > 0 ? `${pct}%` : t('updateStarting')}</p>
+                {stalled && (
+                  <p className="mt-1.5 text-[12px] text-amber-300/90 text-center">
+                    {t('updateSlow')} {t('updateManualHint')}
+                  </p>
+                )}
               </div>
               {/* Something to read while waiting: a small toggle revealing the release notes */}
               {info?.notes && (

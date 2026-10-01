@@ -22,6 +22,9 @@ export function useUpdater(enabled: boolean) {
   const [phase, setPhase] = useState<UpdatePhase>('idle');
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [progress, setProgress] = useState(0); // 0..1 (0 when total unknown)
+  // No bytes for a while: the download host is stalling (seen with GitHub's asset CDN from
+  // some networks). The download keeps going; the dialog just stops pretending it is starting.
+  const [stalled, setStalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const updateRef = useRef<Update | null>(null);
   const checkedRef = useRef(false);
@@ -69,13 +72,26 @@ export function useUpdater(enabled: boolean) {
     const upd = updateRef.current;
     if (!upd || installingRef.current) return; // guard against a double-click starting two downloads
     installingRef.current = true;
+    let watchdog: ReturnType<typeof setInterval> | undefined;
     try {
       setError(null);
       setPhase('downloading');
       setProgress(0);
+      setStalled(false);
       let total = 0;
       let downloaded = 0;
+      let lastByteAt = Date.now();
+      watchdog = setInterval(() => {
+        if (Date.now() - lastByteAt > 30_000) {
+          setStalled((was) => {
+            if (!was) diag('update', `download stalled at ${Math.round(downloaded / 1024)}KB`);
+            return true;
+          });
+        }
+      }, 5_000);
       await upd.downloadAndInstall((ev) => {
+        lastByteAt = Date.now();
+        setStalled(false);
         switch (ev.event) {
           case 'Started':
             total = ev.data.contentLength ?? 0;
@@ -89,9 +105,12 @@ export function useUpdater(enabled: boolean) {
             break;
         }
       });
+      clearInterval(watchdog);
       // New version staged — relaunch into it.
       await relaunch();
     } catch (e) {
+      clearInterval(watchdog);
+      setStalled(false);
       console.error('[Updater] install failed:', e);
       diag('update', `install failed: ${errorKind(e instanceof Error ? e.message : String(e))}`);
       setError(e instanceof Error ? e.message : String(e));
@@ -110,5 +129,5 @@ export function useUpdater(enabled: boolean) {
     setPhase('idle');
   }, [setSkippedUpdateVersion]);
 
-  return { phase, info, progress, error, install, dismiss, checkNow, skip };
+  return { phase, info, progress, stalled, error, install, dismiss, checkNow, skip };
 }

@@ -3,8 +3,9 @@ import { warmLive, releaseLive } from '@/services/sttStream';
 import { 
   Key, Languages, Keyboard, Sparkles, Copy, Globe, Accessibility,
   Volume2, Loader2, CheckCircle, XCircle, BookOpen, MessageSquare, AlertTriangle, Mic, Palette, ChevronRight, RefreshCw, X,
-  Gift, HardDrive, Lock, Cloud, Download, Bug, SlidersHorizontal
+  Gift, HardDrive, Lock, Cloud, Download, Bug, SlidersHorizontal, Type, ALargeSmall, PanelTop, Power,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useSettings } from '@/hooks/useSettings';
 import { useAppStatus } from '@/hooks/useAppStatus';
@@ -25,6 +26,7 @@ import { getDeviceId } from '@/utils/deviceId';
 import Toggle from './Toggle';
 import TutorialTab from './TutorialTab';
 import Select from './Select';
+import { Card, CardHeader, SettingCard, IconBox, Segmented, btnPrimary, btnSecondary } from './settings/ui';
 import { useI18n, UI_LANGUAGES, Language } from '@/i18n';
 import logo from '@/assets/logo.png';
 
@@ -863,7 +865,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
   // action on the right, so a granted card is two lines instead of five. Help text only
   // appears below a row that actually needs attention.
   const permRow = (opts: {
-    icon: React.ReactNode;
+    icon: LucideIcon;
     tone: 'ok' | 'warn' | 'bad' | 'idle';
     title: string;
     desc: string;
@@ -871,7 +873,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     action?: { label: string; onClick: () => void; primary?: boolean };
     help?: React.ReactNode;
   }) => {
-    const box = { ok: 'bg-green-500/15 border-green-500/25', warn: 'bg-amber-500/15 border-amber-500/25', bad: 'bg-red-500/15 border-red-500/25', idle: 'bg-white/5 border-white/10' }[opts.tone];
+    const tint = ({ ok: 'green', warn: 'amber', bad: 'red', idle: 'neutral' } as const)[opts.tone];
     const txt = { ok: 'text-green-400/90', warn: 'text-amber-400/90', bad: 'text-red-400/90', idle: 'text-white/40' }[opts.tone];
     const btn = opts.action?.primary
       ? (opts.tone === 'bad' ? 'bg-red-600/80 hover:bg-red-500 text-white font-medium' : 'bg-amber-600 hover:bg-amber-500 text-white font-medium')
@@ -879,10 +881,10 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
     return (
       <div className="space-y-1.5">
         <div className="flex items-center gap-3">
-          <span className={`w-7 h-7 rounded-md border grid place-items-center shrink-0 ${box}`}>{opts.icon}</span>
+          <IconBox icon={opts.icon} tint={tint} />
           <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-medium text-white/80 leading-tight">{opts.title}</div>
-            <div className="text-[12px] text-white/45 truncate">{opts.desc}</div>
+            <div className="text-[14px] font-medium text-white/90 leading-tight">{opts.title}</div>
+            <div className="text-[12px] text-white/45 truncate mt-0.5">{opts.desc}</div>
           </div>
           {perms && <span className={`text-[11px] shrink-0 ${txt}`}>● {opts.status}</span>}
           {opts.action && (
@@ -891,14 +893,14 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
             </button>
           )}
         </div>
-        {opts.help && <div className="pl-10 text-[12px]">{opts.help}</div>}
+        {opts.help && <div className="pl-11 text-[12px]">{opts.help}</div>}
       </div>
     );
   };
   const permissionsCard = isMac ? (
-    <div className={`bg-[#252526] rounded-lg p-4 space-y-3 ${permsNeedAttention ? 'ring-1 ring-amber-500/40' : ''}`}>
+    <Card attention={permsNeedAttention}>
       {permRow({
-        icon: <Accessibility size={14} className={perms?.accessibility ? 'text-green-400' : 'text-amber-400'} />,
+        icon: Accessibility,
         tone: perms?.accessibility ? 'ok' : 'warn',
         title: t('macAccessibility'),
         desc: t('macAccessibilityDesc'),
@@ -912,7 +914,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
       })}
       <div className="border-t border-white/5" />
       {permRow({
-        icon: <Mic size={14} className={micOk ? 'text-green-400' : micBad ? 'text-red-400' : 'text-white/50'} />,
+        icon: Mic,
         tone: micOk ? 'ok' : micBad ? 'bad' : 'idle',
         title: t('macMicrophone'),
         desc: t('macMicrophoneDesc'),
@@ -928,7 +930,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
             ? <p className="text-red-400/90">{t('permMicRestricted')}</p>
             : undefined,
       })}
-    </div>
+    </Card>
   ) : null;
 
   return (
@@ -1101,7 +1103,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
               instead of scrolling. */}
           <div ref={panelScrollRef} className="flex-1 min-h-0 overflow-y-auto p-6">
           {activeTab === 'general' && (
-            <div className="space-y-5 w-full">
+            <div className="space-y-4 w-full">
               {permsNeedAttention && permissionsCard}
               {/* AI Provider & API Key — and the app-wide power switch, in this header.
                   It used to be a whole card of its own at the BOTTOM of the tab titled
@@ -1109,18 +1111,11 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                   lied — in code it disables every shortcut, voice included. Riding on the
                   first card costs no vertical space, and everything it governs dims below
                   it when off, so cause and effect need no explaining. */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-2.5 mb-0.5">
-                  <Key size={15} className="text-[#0078d4] shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[14px] font-medium text-white/90 block">{t('aiProvider')}</span>
-                    <p className="text-[12px] text-white/40 mt-0.5">{t('aiProviderDesc')}</p>
-                  </div>
-                  <Toggle
-                    enabled={appEnabled}
-                    onChange={(enabled) => { console.log('[Settings] App Enabled:', enabled); setAppEnabled(enabled); }}
-                  />
-                </div>
+              <Card>
+                <CardHeader
+                  icon={Key} tint="blue" title={t('aiProvider')} desc={t('aiProviderDesc')}
+                  aside={<Toggle enabled={appEnabled} onChange={setAppEnabled} />}
+                />
                 <div className={`space-y-3 ${appEnabled ? '' : 'opacity-45 saturate-50 pointer-events-none'} transition-opacity`}>
                 {/* Mode: Free (Built-in) vs Own API Key */}
                 <div className="grid grid-cols-2 gap-2.5">
@@ -1285,17 +1280,12 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                   </>
                 )}
                 </div>
-              </div>
+              </Card>
 
-              <div className={`space-y-5 ${appEnabled ? '' : 'opacity-45 saturate-50 pointer-events-none'} transition-opacity`}>
+              <div className={`space-y-4 ${appEnabled ? '' : 'opacity-45 saturate-50 pointer-events-none'} transition-opacity`}>
               {/* Languages (default source + target for translation) */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-[14px] font-medium text-white/80 flex items-center gap-2">
-                    <Languages size={14} /> {t('languages')}
-                  </label>
-                  <span className="text-[11px] text-white/40">{t('maxCharsInfo').replace('{max}', '5000')}</span>
-                </div>
+              <Card>
+                <CardHeader icon={Languages} tint="indigo" title={t('languages')} desc={t('maxCharsInfo').replace('{max}', '5000')} />
                 <div className="flex items-center gap-3">
                   <div className="flex-1 space-y-1">
                     <span className="text-[12px] text-white/50">{t('fromLang')}</span>
@@ -1325,16 +1315,14 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                     />
                   </div>
                 </div>
-              </div>
+              </Card>
 
               {/* Quick Shortcuts Reference */}
-              <div className="bg-gradient-to-r from-[#252526] to-[#2d2d30] rounded-lg p-4 space-y-3 border border-[#454545]">
-                <h4 className="text-[14px] font-medium text-white/90 flex items-center gap-2">
-                  <Keyboard size={14} className="text-blue-400" /> Shortcuts
-                  {enhanceEnabled && (
-                    <span className="px-1.5 py-0.5 bg-purple-500/30 text-purple-300 rounded text-[9px]">ENHANCE</span>
-                  )}
-                </h4>
+              <Card>
+                <CardHeader
+                  icon={Keyboard} tint="blue" title={t('shortcuts')}
+                  aside={enhanceEnabled ? <span className="px-1.5 py-0.5 bg-purple-500/25 text-purple-300 rounded text-[10px] font-medium">{t('enhanceMode')}</span> : undefined}
+                />
                 <div className="grid gap-2 text-[12px]">
                   <div className="flex items-center justify-between">
                     <span className="text-white/60">{enhanceEnabled ? 'Enhance & replace' : t('translateReplace')}</span>
@@ -1368,25 +1356,15 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                   <Keyboard size={13} /> {t('editShortcuts')}
                   <ChevronRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
                 </button>
-              </div>
+              </Card>
 
               {/* Voice Input (Voice Active) — enable + stop mode live here; shortcuts are in the Shortcuts tab */}
-              <div className="bg-gradient-to-r from-[#252526] to-[#2a2a2c] rounded-lg p-4 border border-[#454545] space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${voiceEnabled ? 'bg-cyan-500/20' : 'bg-[#3c3c3c]'}`}>
-                      <Mic size={18} className={voiceEnabled ? 'text-cyan-400' : 'text-white/40'} />
-                    </div>
-                    <div>
-                      <span className="text-[14px] font-medium text-white block">{t('voiceInput')}</span>
-                      <span className="text-[12px] text-white/40">{voiceEnabled ? t('voiceInputOnDesc') : t('voiceInputOffDesc')}</span>
-                    </div>
-                  </div>
-                  <Toggle
-                    enabled={voiceEnabled}
-                    onChange={(enabled) => { console.log('[Settings] Voice:', enabled); setVoiceEnabled(enabled); }}
-                  />
-                </div>
+              <Card>
+                <CardHeader
+                  icon={Mic} tint={voiceEnabled ? 'cyan' : 'neutral'} title={t('voiceInput')}
+                  desc={voiceEnabled ? t('voiceInputOnDesc') : t('voiceInputOffDesc')}
+                  aside={<Toggle enabled={voiceEnabled} onChange={setVoiceEnabled} />}
+                />
                 {voiceEnabled && (
                   <>
                     {/* Transcription engine — ONE compact picker for every STT source
@@ -1785,19 +1763,12 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                     <p className="text-[11px] text-white/35 px-1">{t('voiceLangFollowNote')}</p>
                   </>
                 )}
-              </div>
+              </Card>
 
-              {/* Auto Start */}
-              <div className="bg-[#252526] rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[14px] text-white/80">{t('startAtLogin')}</span>
-                  <Toggle
-                    enabled={autoStart}
-                    onChange={handleAutoStartChange}
-                    size="sm"
-                  />
-                </div>
-              </div>
+              <SettingCard
+                icon={Power} tint="green" title={t('startAtLogin')}
+                aside={<Toggle enabled={autoStart} onChange={handleAutoStartChange} />}
+              />
 
               {/* Permissions card: here at the bottom once everything is granted; it moves to
                   the TOP of this tab while something is missing (see permsNeedAttention). */}
@@ -1809,11 +1780,8 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           {activeTab === 'shortcuts' && (
             <div className="space-y-4 w-full">
               {/* Shortcuts group: Translate, Popup, Terminal + Enhance Mode */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Keyboard size={14} className="text-white/60" />
-                  <span className="text-[14px] font-medium text-white/80">{t('shortcuts')}</span>
-                </div>
+              <Card>
+                <CardHeader icon={Keyboard} tint="blue" title={t('shortcuts')} />
 
                 {/* Translate Shortcut */}
                 <div className="space-y-2">
@@ -1924,30 +1892,16 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 <div className="border-t border-[#3c3c3c]" />
 
                 {/* Enhance Mode */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Sparkles size={14} className="text-purple-400" />
-                      <span className="text-[14px] font-medium text-purple-300">{t('enhanceMode')}</span>
-                    </div>
-                    <Toggle
-                      enabled={enhanceEnabled}
-                      onChange={(enabled) => { console.log('[Settings] Enhance:', enabled); setEnhanceEnabled(enabled); }}
-                      size="sm"
-                    />
-                  </div>
-                  <p className="text-[12px] text-white/40">
-                    {enhanceEnabled ? `✓ ${t('enhanceModeOn')}` : t('enhanceModeOff')}
-                  </p>
-                </div>
-              </div>
+                <CardHeader
+                  icon={Sparkles} tint="purple" title={t('enhanceMode')}
+                  desc={enhanceEnabled ? t('enhanceModeOn') : t('enhanceModeOff')}
+                  aside={<Toggle enabled={enhanceEnabled} onChange={setEnhanceEnabled} />}
+                />
+              </Card>
 
               {/* Voice shortcuts only — enable + stop mode live in the General tab */}
-              <div className="bg-[#252526] rounded-lg p-3 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Mic size={14} className="text-cyan-400" />
-                  <span className="text-[14px] font-medium text-cyan-300">{t('voiceInput')}</span>
-                </div>
+              <Card>
+                <CardHeader icon={Mic} tint="cyan" title={t('voiceInput')} />
                 {voiceEnabled ? (
                   <>
                     {/* Voice → Original shortcut (primary — raw transcription, shown first) */}
@@ -2025,191 +1979,97 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                 ) : (
                   <p className="text-[12px] text-white/40">{t('voiceEnableInGeneral')}</p>
                 )}
-              </div>
+              </Card>
             </div>
           )}
 
           {activeTab === 'appearance' && (
-            <div className="space-y-5 w-full">
-              {/* App (UI) language */}
-              <div className="bg-[#252526] rounded-lg p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Globe size={16} className="text-indigo-400" />
-                  <span className="text-[15px] font-semibold text-white/90">{t('language')}</span>
-                </div>
-                <p className="text-[12px] text-white/40">{t('uiLanguageDesc')}</p>
+            <div className="space-y-4 w-full">
+              <SettingCard icon={Globe} tint="indigo" title={t('language')} desc={t('uiLanguageDesc')}>
                 <Select
                   value={uiLanguage}
-                  onChange={(value) => { console.log('[Settings] UI Language:', value); setUiLanguage(value as Language); }}
+                  onChange={(value) => setUiLanguage(value as Language)}
                   options={UI_LANGUAGES.map((lang) => ({ value: lang.code, label: lang.nativeName }))}
                   maxHeight={150}
                 />
-              </div>
+              </SettingCard>
 
-              {/* Font */}
-              <div className="bg-[#252526] rounded-lg p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Palette size={16} className="text-indigo-400" />
-                  <span className="text-[15px] font-semibold text-white/90">{t('font')}</span>
-                </div>
-                <p className="text-[12px] text-white/40">{t('fontDesc')}</p>
+              <SettingCard icon={Type} tint="indigo" title={t('font')} desc={t('fontDesc')}>
                 <Select
                   value={uiFont}
                   onChange={setUiFont}
                   options={FONT_OPTIONS.map((f) => ({ value: f.id, label: f.name }))}
                 />
-                <div className="mt-1 px-3 py-2 rounded-md bg-[#1e1e1e] border border-[#3c3c3c]" style={{ fontFamily: fontStackFor(uiFont) }}>
+                <div className="px-3 py-2 rounded-md bg-[#1e1e1e] border border-[#3c3c3c]" style={{ fontFamily: fontStackFor(uiFont) }}>
                   <p className="text-[15px] text-white/90 leading-snug">{t('fontSample')}</p>
                   <p className="text-[12px] text-white/50">{t('sampleText')} · 0123456789</p>
                 </div>
-              </div>
+              </SettingCard>
 
-              {/* UI size */}
-              <div className="bg-[#252526] rounded-lg p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Languages size={16} className="text-indigo-400" />
-                  <span className="text-[15px] font-semibold text-white/90">{t('textSize')}</span>
-                </div>
-                <p className="text-[12px] text-white/40">{t('textSizeDesc')}</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {UI_SCALE_OPTIONS.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setUiScale(s.id)}
-                      className={`py-2.5 rounded-lg text-[13px] font-medium transition-colors flex flex-col items-center gap-0.5 ${
-                        uiScale === s.id
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-[#1e1e1e] text-white/60 hover:text-white hover:bg-[#3c3c3c]'
-                      }`}
-                    >
-                      <span className="text-[16px] font-bold leading-none">A</span>
-                      <span className="text-[11px] leading-none">{s.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <SettingCard icon={ALargeSmall} tint="indigo" title={t('textSize')} desc={t('textSizeDesc')}>
+                <Segmented
+                  value={uiScale}
+                  onChange={setUiScale}
+                  options={UI_SCALE_OPTIONS.map((s) => ({
+                    value: s.id,
+                    label: (
+                      <span className="flex flex-col items-center gap-0.5">
+                        <span className="text-[16px] font-bold leading-none">A</span>
+                        <span className="text-[11px] leading-none">{s.name}</span>
+                      </span>
+                    ),
+                  }))}
+                />
+              </SettingCard>
 
-              {/* Recording popup position (top / center / bottom) */}
-              <div className="bg-[#252526] rounded-lg p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Mic size={16} className="text-indigo-400" />
-                  <span className="text-[15px] font-semibold text-white/90">{t('voicePopupPosition')}</span>
-                </div>
-                <p className="text-[12px] text-white/40">{t('voicePopupPositionDesc')}</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {([['top', t('positionTop')], ['center', t('positionCenter')], ['bottom', t('positionBottom')]] as const).map(([id, label]) => (
-                    <button
-                      key={id}
-                      onClick={() => { console.log('[Settings] Popup position:', id); setVoicePopupPosition(id); }}
-                      className={`py-2.5 rounded-lg text-[13px] font-medium transition-colors ${
-                        voicePopupPosition === id
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-[#1e1e1e] text-white/60 hover:text-white hover:bg-[#3c3c3c]'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <SettingCard icon={PanelTop} tint="indigo" title={t('voicePopupPosition')} desc={t('voicePopupPositionDesc')}>
+                <Segmented
+                  value={voicePopupPosition}
+                  onChange={setVoicePopupPosition}
+                  options={[
+                    { value: 'top', label: t('positionTop') },
+                    { value: 'center', label: t('positionCenter') },
+                    { value: 'bottom', label: t('positionBottom') },
+                  ]}
+                />
+              </SettingCard>
             </div>
           )}
 
           {activeTab === 'feedback' && (
-            <div className="space-y-5 w-full">
-              {/* Sound */}
-              <div className="bg-[#252526] rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/20 rounded">
-                      <Volume2 size={18} className="text-blue-400" />
-                    </div>
-                    <div>
-                      <span className="text-[14px] text-white/80 block">{t('soundFeedback')}</span>
-                      <span className="text-[12px] text-white/40">{t('soundFeedbackDesc')}</span>
-                    </div>
-                  </div>
-                  <Toggle
-                    enabled={soundEnabled}
-                    onChange={(enabled) => { console.log('[Settings] Sound:', enabled); setSoundEnabled(enabled); }}
-                  />
-                </div>
-              </div>
+            <div className="space-y-4 w-full">
+              <SettingCard
+                icon={Volume2} tint="blue" title={t('soundFeedback')} desc={t('soundFeedbackDesc')}
+                aside={<Toggle enabled={soundEnabled} onChange={setSoundEnabled} />}
+              />
 
-              {/* Voice listening sound (on/off beep when recording starts/stops) */}
-              <div className="bg-[#252526] rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cyan-500/20 rounded">
-                      <Mic size={18} className="text-cyan-400" />
-                    </div>
-                    <div>
-                      <span className="text-[14px] text-white/80 block">{t('voiceSound')}</span>
-                      <span className="text-[12px] text-white/40">{t('voiceSoundDesc')}</span>
-                    </div>
-                  </div>
-                  <Toggle
-                    enabled={voiceSoundEnabled}
-                    onChange={(enabled) => { console.log('[Settings] Voice sound:', enabled); setVoiceSoundEnabled(enabled); }}
-                  />
-                </div>
-              </div>
+              <SettingCard
+                icon={Mic} tint="cyan" title={t('voiceSound')} desc={t('voiceSoundDesc')}
+                aside={<Toggle enabled={voiceSoundEnabled} onChange={setVoiceSoundEnabled} />}
+              />
 
-              {/* Loading */}
-              <div className="bg-[#252526] rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-500/20 rounded">
-                      <Loader2 size={18} className="text-purple-400" />
-                    </div>
-                    <div>
-                      <span className="text-[14px] text-white/80 block">{t('loadingIndicator')}</span>
-                      <span className="text-[12px] text-white/40">{t('loadingIndicatorDesc')}</span>
-                      <span className="text-[12px] text-amber-400 block">⚠️ {t('loadingWarning')}</span>
-                    </div>
-                  </div>
-                  <Toggle
-                    enabled={loadingEnabled}
-                    onChange={(enabled) => { console.log('[Settings] Loading:', enabled); setLoadingEnabled(enabled); }}
-                  />
-                </div>
-              </div>
+              <SettingCard
+                icon={Loader2} tint="purple" title={t('loadingIndicator')}
+                desc={<>{t('loadingIndicatorDesc')} <span className="text-amber-400/90">{t('loadingWarning')}</span></>}
+                aside={<Toggle enabled={loadingEnabled} onChange={setLoadingEnabled} />}
+              />
 
-              {/* Updates: auto-check toggle + manual check */}
-              <div className="bg-[#252526] rounded-lg p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cyan-500/20 rounded">
-                      <RefreshCw size={18} className="text-cyan-400" />
-                    </div>
-                    <div>
-                      <span className="text-[14px] text-white/80 block">{t('autoUpdateLabel')}</span>
-                      <span className="text-[12px] text-white/40">{t('autoUpdateDesc')}</span>
-                    </div>
-                  </div>
-                  <Toggle enabled={autoUpdateCheck} onChange={setAutoUpdateCheck} />
-                </div>
+              <SettingCard
+                icon={RefreshCw} tint="green" title={t('autoUpdateLabel')} desc={t('autoUpdateDesc')}
+                aside={<Toggle enabled={autoUpdateCheck} onChange={setAutoUpdateCheck} />}
+              >
                 <button
                   onClick={handleCheckForUpdates}
                   disabled={checkingUpdate || !onCheckForUpdates}
-                  className="mt-3 w-full px-3 py-2 text-[13px] rounded-md bg-[#1e1e1e] border border-[#3c3c3c] text-white/80 hover:bg-white/5 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                  className={`${btnSecondary} w-full py-2 text-[13px] flex items-center justify-center gap-2`}
                 >
                   <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
                   {checkingUpdate ? t('checkingUpdate') : t('checkForUpdates')}
                 </button>
-              </div>
+              </SettingCard>
 
               {/* Diagnostics: report a problem with the safe event log. */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-rose-500/20 rounded">
-                    <Bug size={18} className="text-rose-400" />
-                  </div>
-                  <div>
-                    <span className="text-[14px] text-white/80 block">{t('diagTitle')}</span>
-                    <span className="text-[12px] text-white/40">{t('diagDesc')}</span>
-                  </div>
-                </div>
+              <SettingCard icon={Bug} tint="rose" title={t('diagTitle')} desc={t('diagDesc')}>
                 <textarea
                   value={diagNote}
                   onChange={(e) => setDiagNote(e.target.value.slice(0, 2000))}
@@ -2218,23 +2078,13 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                   className="w-full px-3 py-2 text-[13px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-md text-white/80 placeholder:text-white/30 focus:outline-none focus:border-[#007acc] resize-none"
                 />
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => { void sendDiagnostics(); }}
-                    disabled={diagState === 'sending'}
-                    className="px-3 py-1.5 text-[12px] font-medium bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-50 text-white rounded transition-colors"
-                  >
+                  <button onClick={() => { void sendDiagnostics(); }} disabled={diagState === 'sending'} className={btnPrimary}>
                     {diagState === 'sending' ? t('diagSending') : t('diagSend')}
                   </button>
-                  <button
-                    onClick={() => { void copyDiagnostics(); }}
-                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
-                  >
+                  <button onClick={() => { void copyDiagnostics(); }} className={btnSecondary}>
                     {diagState === 'copied' ? t('diagCopied') : t('diagCopy')}
                   </button>
-                  <button
-                    onClick={() => { void diagOpenFolder().catch(() => {}); }}
-                    className="px-3 py-1.5 text-[12px] bg-white/5 hover:bg-white/10 text-white/70 rounded border border-white/10 transition-colors"
-                  >
+                  <button onClick={() => { void diagOpenFolder().catch(() => {}); }} className={btnSecondary}>
                     {t('diagOpenFolder')}
                   </button>
                   <button
@@ -2250,7 +2100,7 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                   </p>
                 )}
                 {diagState === 'failed' && <p className="text-[12px] text-amber-400/90">{t('diagSendFailed')}</p>}
-              </div>
+              </SettingCard>
             </div>
           )}
 

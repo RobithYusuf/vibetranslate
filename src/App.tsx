@@ -308,6 +308,7 @@ function App() {
         phase={updater.phase}
         info={updater.info}
         progress={updater.progress}
+        stalled={updater.stalled}
         error={updater.error}
         onInstall={updater.install}
         onDismiss={updater.dismiss}
