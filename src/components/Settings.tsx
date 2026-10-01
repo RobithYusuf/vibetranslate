@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { warmLive, releaseLive } from '@/services/sttStream';
 import { 
   Key, Languages, Keyboard, Sparkles, Copy, Globe, Accessibility,
-  Volume2, Loader2, CheckCircle, XCircle, BookOpen, MessageSquare, MousePointer, AlertTriangle, Mic, Palette, ChevronRight, RefreshCw, X,
-  Gift, HardDrive, Lock, Cloud, Download, Bug
+  Volume2, Loader2, CheckCircle, XCircle, BookOpen, MessageSquare, AlertTriangle, Mic, Palette, ChevronRight, RefreshCw, X,
+  Gift, HardDrive, Lock, Cloud, Download, Bug, SlidersHorizontal
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useSettings } from '@/hooks/useSettings';
@@ -23,6 +23,7 @@ import APP_CONFIG from '@/config';
 import { diag, diagReport, diagClear, diagOpenFolder } from '@/services/diag';
 import { getDeviceId } from '@/utils/deviceId';
 import Toggle from './Toggle';
+import TutorialTab from './TutorialTab';
 import Select from './Select';
 import { useI18n, UI_LANGUAGES, Language } from '@/i18n';
 import logo from '@/assets/logo.png';
@@ -1030,18 +1031,18 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
       )}
 
       {/* Tab Bar */}
-      <div className="h-12 bg-[#252526] border-b border-[#1e1e1e] flex items-center px-3 gap-1">
+      <div className="h-11 bg-[#252526] border-b border-[#1e1e1e] flex items-end px-3 gap-0.5">
         {[
-          { id: 'general', label: t('tabGeneral'), icon: <Key size={16} /> },
-          { id: 'shortcuts', label: t('tabShortcuts'), icon: <Keyboard size={16} /> },
-          { id: 'appearance', label: t('tabAppearance'), icon: <Palette size={16} /> },
-          { id: 'feedback', label: t('tabFeedback'), icon: <Volume2 size={16} /> },
-          { id: 'tutorial', label: t('tabTutorial'), icon: <BookOpen size={16} /> },
+          { id: 'general', label: t('tabGeneral'), icon: <SlidersHorizontal size={15} /> },
+          { id: 'shortcuts', label: t('tabShortcuts'), icon: <Keyboard size={15} /> },
+          { id: 'appearance', label: t('tabAppearance'), icon: <Palette size={15} /> },
+          { id: 'feedback', label: t('tabFeedback'), icon: <MessageSquare size={15} /> },
+          { id: 'tutorial', label: t('tabTutorial'), icon: <BookOpen size={15} /> },
         ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as TabType)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-[14px] font-medium rounded-t-md border-b-2 transition-colors ${
+            className={`relative flex items-center gap-1.5 h-9 px-3.5 text-[13px] font-medium rounded-t-md border-b-2 transition-colors ${
               activeTab === tab.id
                 ? 'border-[#0078d4] text-white bg-[#1e1e1e]'
                 : 'border-transparent text-white/55 hover:text-white/90 hover:bg-white/5'
@@ -1049,6 +1050,10 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           >
             {tab.icon}
             {tab.label}
+            {/* A missing permission is flagged on the tab that fixes it. */}
+            {tab.id === 'general' && permsNeedAttention && (
+              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-amber-400" aria-label={t('permBadge')} />
+            )}
           </button>
         ))}
       </div>
@@ -2258,137 +2263,13 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
           )}
 
           {activeTab === 'tutorial' && (
-            <div className="space-y-5 w-full">
-              {/* Quick Start */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <h3 className="text-[14px] font-semibold text-white flex items-center gap-2">
-                  <BookOpen size={16} className="text-blue-400" /> {t('quickStart')}
-                </h3>
-                <ol className="space-y-2 text-[12px] text-white/70">
-                  <li className="flex gap-2"><span className="text-[#0078d4] font-mono">1.</span> {t('quickStart1')}</li>
-                  <li className="flex gap-2"><span className="text-[#0078d4] font-mono">2.</span> {t('quickStart2')}</li>
-                  <li className="flex gap-2"><span className="text-[#0078d4] font-mono">3.</span> {t('quickStart3')}</li>
-                  <li className="flex gap-2"><span className="text-[#0078d4] font-mono">4.</span> {t('quickStart4')}</li>
-                  <li className="flex gap-2"><span className="text-[#0078d4] font-mono">5.</span> {t('quickStart5')}</li>
-                  {voiceEnabled && <li className="flex gap-2"><span className="text-cyan-400 font-mono">6.</span> {t('quickStartVoice')}</li>}
-                </ol>
-              </div>
-
-              {/* Tip: mouse button as a shortcut (via mouse-software key mapping) */}
-              <div className="bg-[#252526] rounded-lg p-4 flex items-start gap-3">
-                <div className="p-2 bg-purple-500/20 rounded shrink-0">
-                  <MousePointer size={16} className="text-purple-400" />
-                </div>
-                <div>
-                  <h3 className="text-[13.5px] font-semibold text-white mb-1">{t('mouseTipTitle')}</h3>
-                  <p className="text-[12px] text-white/60 leading-relaxed">{t('mouseTipDesc')}</p>
-                </div>
-              </div>
-
-              {/* Shortcuts Guide */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <h3 className="text-[14px] font-semibold text-white flex items-center gap-2">
-                  <Keyboard size={16} className="text-blue-400" /> {t('shortcuts')}
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3 p-2 bg-[#1e1e1e] rounded">
-                    <div className="p-1.5 bg-blue-500/20 rounded">
-                      <MousePointer size={14} className="text-blue-400" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[14px] font-medium text-white">{t('translateReplace')}</span>
-                        <code className="px-2 py-0.5 bg-[#3c3c3c] rounded text-[12px] text-blue-300">{formatShortcut(shortcut)}</code>
-                      </div>
-                      <p className="text-[12px] text-white/50 mt-1">{t('shortcutReplaceDesc')}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3 p-2 bg-[#1e1e1e] rounded">
-                    <div className="p-1.5 bg-green-500/20 rounded">
-                      <MessageSquare size={14} className="text-green-400" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[14px] font-medium text-white">{t('translatePopup')}</span>
-                        <code className="px-2 py-0.5 bg-[#3c3c3c] rounded text-[12px] text-green-300">{formatShortcut(popupShortcut)}</code>
-                      </div>
-                      <p className="text-[12px] text-white/50 mt-1">{t('shortcutPopupDesc')}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3 p-2 bg-[#1e1e1e] rounded">
-                    <div className="p-1.5 bg-amber-500/20 rounded">
-                      <Keyboard size={14} className="text-amber-400" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[14px] font-medium text-white">{t('terminalMode')}</span>
-                        <code className="px-2 py-0.5 bg-[#3c3c3c] rounded text-[12px] text-amber-300">{formatShortcut(terminalShortcut)}</code>
-                      </div>
-                      <p className="text-[12px] text-white/50 mt-1">{t('shortcutTerminalDesc')}</p>
-                    </div>
-                  </div>
-                  {voiceEnabled && (
-                    <div className="flex items-start gap-3 p-2 bg-[#1e1e1e] rounded">
-                      <div className="p-1.5 bg-cyan-500/20 rounded">
-                        <Mic size={14} className="text-cyan-400" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[14px] font-medium text-white">{t('voiceInput')}</span>
-                          <code className="px-2 py-0.5 bg-[#3c3c3c] rounded text-[12px] text-cyan-300">{formatShortcut(voiceOriginalShortcut)}</code>
-                        </div>
-                        <p className="text-[12px] text-white/50 mt-1">{t('shortcutVoiceDesc')}</p>
-                      </div>
-                    </div>
-                  )}
-                  {enhanceEnabled && (
-                    <div className="flex items-start gap-3 p-2 bg-purple-500/10 border border-purple-500/30 rounded">
-                      <div className="p-1.5 bg-purple-500/20 rounded">
-                        <Sparkles size={14} className="text-purple-400" />
-                      </div>
-                      <div className="flex-1">
-                        <span className="text-[14px] font-medium text-purple-300">{t('enhanceModeActive')}</span>
-                        <p className="text-[12px] text-white/50 mt-1">{t('enhanceModeActiveDesc')}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Tips */}
-              <div className="bg-[#252526] rounded-lg p-4 space-y-3">
-                <h3 className="text-[14px] font-semibold text-white flex items-center gap-2">
-                  <BookOpen size={16} className="text-amber-400" /> {t('tips')}
-                </h3>
-                <ul className="space-y-2 text-[12px] text-white/60">
-                  <li className="flex gap-2">
-                    <span className="text-green-400">•</span>
-                    <span><strong className="text-white/80">{t('tipAlwaysRunning')}</strong> {t('tipAlwaysRunningDesc')}</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="text-amber-400">•</span>
-                    <span><strong className="text-white/80">{t('tipBuiltinFree')}</strong> {t('tipBuiltinFreeDesc')}</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="text-amber-400">•</span>
-                    <span><strong className="text-white/80">{t('tipOwnApiKey')}</strong> {t('tipOwnApiKeyDesc')}</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="text-amber-400">•</span>
-                    <span><strong className="text-white/80">{t('tipAutoDetect')}</strong> {t('tipAutoDetectDesc')}</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="text-amber-400">•</span>
-                    <span><strong className="text-white/80">{t('tipMessagingApps')}</strong> {t('tipMessagingAppsDesc')}</span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Status bar note (kept from the old How-It-Works section) */}
-              <div className="p-2.5 bg-[#1e1e1e] rounded-lg text-[12px] text-white/40">
-                <strong className="text-white/60">{t('note')}</strong> {t('statusBarNote')}
-              </div>
-            </div>
+            <TutorialTab
+              permsNeedAttention={permsNeedAttention}
+              onOpenTab={(tab) => {
+                setActiveTab(tab);
+                requestAnimationFrame(() => panelScrollRef.current?.scrollTo({ top: 0 }));
+              }}
+            />
           )}
           </div>
         </div>

@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.63',
+    date: '2026-10-01',
+    changes: [
+      'New Tutorial: a short checklist to get started, all your current shortcuts (including both voice shortcuts), the keys that work while recording, and where to get help',
+      'Tidier tab bar with clearer icons; the General tab shows a dot when a permission is missing',
+      'Mouse shortcuts now read as "Back button" instead of "Mouse3"',
+    ],
+  },
+  {
     version: '1.0.62',
     date: '2026-10-01',
     changes: [
