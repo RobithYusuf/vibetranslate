@@ -144,6 +144,7 @@ export default function RecordingOverlay() {
   const modeRef = useRef<VoiceMode>('translate');
   const targetAppRef = useRef<string>('');
   const targetPosRef = useRef<[number, number] | null>(null);
+  const targetPidRef = useRef<number | null>(null);
   const processingRef = useRef(false);            // re-entrancy guard for process()
   const cancelledRef = useRef(false);             // set by cancel() during the pipeline
   const abortRef = useRef<AbortController | null>(null); // aborts in-flight transcribe/translate
@@ -209,7 +210,7 @@ export default function RecordingOverlay() {
     // to the app the user was in (or hide ourselves if unknown). Success ('done') already returns
     // focus by pasting into the target, so skip it there.
     if (visual !== 'done') {
-      void invoke('restore_focus_to_app', { app: targetAppRef.current || '' }).catch(() => {});
+      void invoke('restore_focus_to_app', { app: targetAppRef.current || '', pid: targetPidRef.current }).catch(() => {});
     }
     const delay = visual === 'error' ? 2600 : 0;
     // Track the hide timer so a fresh begin() can cancel it — otherwise a stale timer
@@ -510,7 +511,7 @@ export default function RecordingOverlay() {
         void invoke('hide_transcript').catch(() => { /* cosmetic */ });
         await setClipboardText(out);
         await sleep(50); // the clipboard write is synchronous; this only lets the pasteboard settle
-        await simulatePasteToApp(targetAppRef.current || '', targetPosRef.current);
+        await simulatePasteToApp(targetAppRef.current || '', targetPosRef.current, targetPidRef.current);
 
         diag('voice', `pasted chars=${out.length} mode=${modeRef.current}`);
         // The text appearing IS the confirmation: hide the pill at once (finishSession 'done'
@@ -598,6 +599,7 @@ export default function RecordingOverlay() {
       modeRef.current = payload.mode;
       targetAppRef.current = payload.targetApp || '';
       targetPosRef.current = payload.targetPos ?? null;
+      targetPidRef.current = payload.targetPid ?? null;
       processingRef.current = false;
       cancelledRef.current = false;
       captureLiveRef.current = false;

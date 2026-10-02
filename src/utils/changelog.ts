@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.67',
+    date: '2026-10-03',
+    changes: [
+      'macOS: text now goes into the exact window you were typing in, even with two copies of the same browser open (for example a second Chrome profile)',
+      'Reading the target app at the start of a shortcut is faster',
+    ],
+  },
+  {
     version: '1.0.66',
     date: '2026-10-01',
     changes: [

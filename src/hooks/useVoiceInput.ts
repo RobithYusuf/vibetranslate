@@ -47,6 +47,7 @@ export interface VoiceStartPayload {
   mode: VoiceMode;
   targetApp: string;
   targetPos: [number, number] | null; // target window pos snapshotted at capture (see paste)
+  targetPid: number | null; // target process id (macOS): app names are not unique
   config: {
     apiKeys: Record<AIProvider, string | null>;
     provider: AIProvider;
@@ -135,6 +136,9 @@ export function useVoiceInput() {
     // window the user STARTED in.
     let targetPos: [number, number] | null = null;
     try { targetPos = (await invoke<[number, number] | null>('get_captured_target_pos')) ?? null; } catch { /* best effort */ }
+    // And the process id: two browsers can share one app name (a second Chrome profile).
+    let targetPid: number | null = null;
+    try { targetPid = (await invoke<number | null>('get_captured_target_pid')) ?? null; } catch { /* best effort */ }
 
     // Show the overlay FIRST. Only mark recording + hand off if it actually showed —
     // otherwise isRecording would be stuck true and the next press would misfire as a stop.
@@ -163,6 +167,7 @@ export function useVoiceInput() {
       mode,
       targetApp,
       targetPos,
+      targetPid,
       config: { apiKeys, provider, model, sourceLang, targetLang, voiceAutoStop, soundEnabled, voiceSoundEnabled, micAutoGain, voiceSttEngine, voiceLiveMode, voiceCleanup, voiceMaxMs, voiceSilenceMs, micDeviceId, voiceCorrections, customBaseURL, customModel, finishKey, holdToTalk: voiceHoldToTalk },
     };
     void emitTo('recording', 'voice-start', payload);

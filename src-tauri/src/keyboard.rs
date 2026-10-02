@@ -129,6 +129,40 @@ static LAST_ACTIVE_HWND: Lazy<Mutex<isize>> = Lazy::new(|| Mutex::new(0));
 /// AXRaise exactly the window the user was in.
 static LAST_ACTIVE_WIN_POS: Lazy<Mutex<Option<(i32, i32)>>> = Lazy::new(|| Mutex::new(None));
 
+/// macOS: process id of the captured target. The NAME is not unique: a second Chrome started
+/// with its own profile (a test or automation browser, a WhatsApp-Web profile) is another
+/// process also called "Google Chrome", and `first application process whose name is ...`
+/// picked whichever came first, so the paste landed in a different browser than the one the
+/// user was typing in. The pid names exactly one process.
+#[cfg(target_os = "macos")]
+static LAST_ACTIVE_PID: Lazy<Mutex<Option<i32>>> = Lazy::new(|| Mutex::new(None));
+
+#[cfg(target_os = "macos")]
+fn last_target_pid() -> Option<i32> {
+    LAST_ACTIVE_PID.lock().ok().and_then(|g| *g)
+}
+
+#[cfg(target_os = "macos")]
+fn set_last_target_pid(pid: Option<i32>) {
+    if let Ok(mut g) = LAST_ACTIVE_PID.lock() {
+        *g = pid;
+    }
+}
+
+// Frontend snapshot of the captured process id (voice keeps it for the whole recording, like
+// the window position below).
+#[tauri::command]
+pub async fn get_captured_target_pid() -> Option<i32> {
+    #[cfg(target_os = "macos")]
+    {
+        last_target_pid()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
 // The captured target window's top-left (global logical points) — the "lock". Window
 // placement (commands.rs) anchors overlays/popup to the display this window is on, so
 // they follow where the user is WORKING even when the cursor is parked on another screen.
@@ -250,6 +284,26 @@ fn wait_modifiers_released(timeout_ms: u64) {
 // re-checks that the frontmost window is still the captured one), so mixing the two would
 // silently break window matching on a multi-monitor setup, which is the very bug this tracker
 // exists to prevent.
+// The frontmost application's process id, same in-process route as frontmost_name_fast.
+#[cfg(target_os = "macos")]
+fn frontmost_pid_fast() -> Option<i32> {
+    use cocoa::base::{id, nil};
+    use objc::rc::autoreleasepool;
+    use objc::{class, msg_send, sel, sel_impl};
+    autoreleasepool(|| unsafe {
+        let ws: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if ws == nil {
+            return None;
+        }
+        let app: id = msg_send![ws, frontmostApplication];
+        if app == nil {
+            return None;
+        }
+        let pid: i32 = msg_send![app, processIdentifier];
+        Some(pid)
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn frontmost_name_fast() -> Option<String> {
     use cocoa::base::{id, nil};
@@ -284,6 +338,12 @@ fn frontmost_name_fast() -> Option<String> {
 // Frontmost app AND its front window's screen position (one osascript round-trip).
 #[cfg(target_os = "macos")]
 fn get_frontmost_app_and_window() -> Result<(String, Option<(i32, i32)>), String> {
+    get_frontmost_target().map(|(app, pos, _)| (app, pos))
+}
+
+// Frontmost app, its front window's position, and its process id (one osascript round-trip).
+#[cfg(target_os = "macos")]
+fn get_frontmost_target() -> Result<(String, Option<(i32, i32)>, Option<i32>), String> {
     let script = r#"tell application "System Events"
         set p to first application process whose frontmost is true
         set out to name of p
@@ -297,7 +357,7 @@ fn get_frontmost_app_and_window() -> Result<(String, Option<(i32, i32)>), String
     // frontmost process (it races the real answer). That noise reading broke both capture
     // ("No app tracked" right after launch) and the frontmost-at-copy check — retry briefly
     // before accepting it.
-    let mut last: (String, Option<(i32, i32)>) = (String::new(), None);
+    let mut last: (String, Option<(i32, i32)>, Option<i32>) = (String::new(), None, None);
     for attempt in 0..3 {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(40));
@@ -313,15 +373,21 @@ fn get_frontmost_app_and_window() -> Result<(String, Option<(i32, i32)>), String
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let mut parts = raw.split("||");
         let app = parts.next().unwrap_or_default().trim().to_string();
-        let pos = match (parts.next(), parts.next()) {
+        let script_pos = match (parts.next(), parts.next()) {
             (Some(x), Some(y)) => match (x.trim().parse::<i32>(), y.trim().parse::<i32>()) {
                 (Ok(x), Ok(y)) => Some((x, y)),
                 _ => None,
             },
             _ => None,
         };
+        // System Events resolves a process by NAME, so with two instances of one app (a second
+        // Chrome profile) it reports the OTHER instance's pid and front window. Read both
+        // natively from the process that is really frontmost; the script's position is only
+        // a fallback when Accessibility gives no window.
+        let pid = pid_focus::frontmost_pid();
+        let pos = pid.and_then(pid_focus::front_window_pos).or(script_pos);
         let transient = app == "osascript";
-        last = (app, pos);
+        last = (app, pos, pid);
         if !transient {
             break;
         }
@@ -334,14 +400,23 @@ fn get_frontmost_app_and_window() -> Result<(String, Option<(i32, i32)>), String
 // plain app focus when no position is stored or the window moved/closed.
 #[cfg(target_os = "macos")]
 fn activate_target_prelude(app: &str) -> String {
-    activate_target_prelude_at(app, LAST_ACTIVE_WIN_POS.lock().ok().and_then(|g| *g))
+    activate_target_prelude_at(app, LAST_ACTIVE_WIN_POS.lock().ok().and_then(|g| *g), last_target_pid())
 }
 
 // Like activate_target_prelude, but with the window position supplied by the CALLER — used by
 // voice paste, whose target was captured at recording START: the global slot may have been
 // overwritten since (e.g. a translate run in another window while the recording was live).
 #[cfg(target_os = "macos")]
-fn activate_target_prelude_at(app: &str, pos: Option<(i32, i32)>) -> String {
+fn activate_target_prelude_at(app: &str, pos: Option<(i32, i32)>, pid: Option<i32>) -> String {
+    // Native, by process id, whenever we know it. AppleScript cannot do this: System Events
+    // looks processes up by name, so `whose unix id is N` returns the FIRST process with that
+    // name (verified: asking for a test-Chrome's pid returned the main Chrome's). The focus
+    // happens here, so the returned AppleScript prelude is empty.
+    if let Some(pid) = pid {
+        if pid_focus::focus(pid, pos) {
+            return String::new();
+        }
+    }
     let app_esc = escape_applescript(app);
     match pos {
         Some((x, y)) => format!(
@@ -375,6 +450,128 @@ fn activate_target_prelude_at(app: &str, pos: Option<(i32, i32)>) -> String {
             "tell application \"{}\" to activate\n            delay 0.15\n",
             app_esc
         ),
+    }
+}
+
+/// Native window targeting by process id (NSRunningApplication + the Accessibility API).
+#[cfg(target_os = "macos")]
+mod pid_focus {
+    use cocoa::base::{id, nil, BOOL, YES};
+    use core_foundation::array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
+    use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::string::{CFString, CFStringRef};
+    use objc::rc::autoreleasepool;
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::ffi::c_void;
+    use std::ptr;
+
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+    const AX_VALUE_CGPOINT: u32 = 1;
+    const ACTIVATE_IGNORING_OTHER_APPS: u64 = 1 << 1;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
+        fn AXUIElementCopyAttributeValue(el: CFTypeRef, attr: CFStringRef, value: *mut CFTypeRef) -> i32;
+        fn AXUIElementSetAttributeValue(el: CFTypeRef, attr: CFStringRef, value: CFTypeRef) -> i32;
+        fn AXUIElementPerformAction(el: CFTypeRef, action: CFStringRef) -> i32;
+        fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut c_void) -> u8;
+    }
+
+    /// Pid of the frontmost application (NSWorkspace: exact, unlike System Events).
+    pub fn frontmost_pid() -> Option<i32> {
+        super::frontmost_pid_fast()
+    }
+
+    unsafe fn copy_attr(el: CFTypeRef, name: &'static str) -> Option<CFTypeRef> {
+        let mut v: CFTypeRef = ptr::null();
+        let key = CFString::from_static_string(name);
+        if AXUIElementCopyAttributeValue(el, key.as_concrete_TypeRef(), &mut v) == 0 && !v.is_null() {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    unsafe fn window_pos(w: CFTypeRef) -> Option<(i32, i32)> {
+        let v = copy_attr(w, "AXPosition")?;
+        let mut pt = CGPoint::default();
+        let ok = AXValueGetValue(v, AX_VALUE_CGPOINT, &mut pt as *mut CGPoint as *mut c_void);
+        CFRelease(v);
+        if ok != 0 {
+            Some((pt.x.round() as i32, pt.y.round() as i32))
+        } else {
+            None
+        }
+    }
+
+    /// Top-left of the process's focused (else main) window, in the same global coordinates
+    /// System Events reports, so it compares against positions read either way.
+    pub fn front_window_pos(pid: i32) -> Option<(i32, i32)> {
+        unsafe {
+            let ax = AXUIElementCreateApplication(pid);
+            if ax.is_null() {
+                return None;
+            }
+            let w = copy_attr(ax, "AXFocusedWindow").or_else(|| copy_attr(ax, "AXMainWindow"));
+            let pos = w.and_then(|w| {
+                let p = window_pos(w);
+                CFRelease(w);
+                p
+            });
+            CFRelease(ax);
+            pos
+        }
+    }
+
+    /// Bring process `pid` to the front and, when `pos` is known, raise its window at that
+    /// position. False when the process is gone: the caller falls back to the name.
+    pub fn focus(pid: i32, pos: Option<(i32, i32)>) -> bool {
+        let activated = autoreleasepool(|| unsafe {
+            let app: id = msg_send![class!(NSRunningApplication), runningApplicationWithProcessIdentifier: pid];
+            if app == nil {
+                return false;
+            }
+            let ok: BOOL = msg_send![app, activateWithOptions: ACTIVATE_IGNORING_OTHER_APPS];
+            ok == YES
+        });
+        if !activated {
+            return false;
+        }
+        if let Some((x, y)) = pos {
+            let mut matched = false;
+            unsafe {
+                let ax = AXUIElementCreateApplication(pid);
+                if !ax.is_null() {
+                    if let Some(wins) = copy_attr(ax, "AXWindows") {
+                        let n = CFArrayGetCount(wins as CFArrayRef);
+                        for i in 0..n {
+                            let w = CFArrayGetValueAtIndex(wins as CFArrayRef, i) as CFTypeRef;
+                            if window_pos(w) == Some((x, y)) {
+                                let raise = CFString::from_static_string("AXRaise");
+                                AXUIElementPerformAction(w, raise.as_concrete_TypeRef());
+                                let main = CFString::from_static_string("AXMain");
+                                AXUIElementSetAttributeValue(w, main.as_concrete_TypeRef(), CFBoolean::true_value().as_CFTypeRef());
+                                matched = true;
+                                break;
+                            }
+                        }
+                        CFRelease(wins);
+                    }
+                    CFRelease(ax);
+                }
+            }
+            dlog!("[Focus] pid {} window at {},{}: {}", pid, x, y, if matched { "raised" } else { "not found, app focus only" });
+        }
+        // Same settle time the AppleScript prelude gives the window server before the keystroke.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        true
     }
 }
 
@@ -466,6 +663,7 @@ pub fn start_app_tracker() {
         // ran osascript on every tick for as long as such an app was in front.
         #[cfg(target_os = "macos")]
         let mut last_cheap: Option<String> = None;
+        let mut last_cheap_pid: Option<i32> = None;
         loop {
             // While an operation has pinned the target, don't overwrite it.
             if tracker_is_paused() {
@@ -490,11 +688,13 @@ pub fn start_app_tracker() {
                     continue;
                 }
 
-                let unchanged = cheap_name.is_some() && cheap_name == last_cheap
+                // Same name is not the same app: two Chrome instances share one name.
+                let cheap_pid = frontmost_pid_fast();
+                let unchanged = cheap_pid == last_cheap_pid && (cheap_name.is_some() && cheap_name == last_cheap
                     || match (&cheap_name, LAST_ACTIVE_APP.lock().ok().as_deref()) {
                         (Some(now), Some(Some(prev))) => now == prev,
                         _ => false,
-                    };
+                    });
                 let have_pos = LAST_ACTIVE_WIN_POS.lock().ok().map(|g| g.is_some()).unwrap_or(false);
                 // Moving a window WITHIN one app changes its position without changing the name,
                 // and nothing tells us about it. A slow refresh bounds how stale that can get at
@@ -508,9 +708,11 @@ pub fn start_app_tracker() {
                 ticks_since_reading = 0;
                 // Something moved, or we have no position yet: pay for the authoritative
                 // reading, whose coordinates match what the rest of the code compares against.
-                if let Ok((app, pos)) = get_frontmost_app_and_window() {
+                if let Ok((app, pos, pid)) = get_frontmost_target() {
                     if !is_our_app(&app) {
                         last_cheap = cheap_name.clone();
+                        last_cheap_pid = cheap_pid;
+                        set_last_target_pid(pid);
                         if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
                             let prev = guard.clone();
                             *guard = Some(app.clone());
@@ -1221,8 +1423,9 @@ pub async fn capture_foreground_hwnd(live: bool, long_pin: Option<bool>) -> Resu
         // instant, keeping the ~100-150ms osascript round-trip OFF the critical path to opening the
         // mic (voice start latency), and the cache is plenty accurate for a paste target.
         if live {
-            if let Ok((app, pos)) = get_frontmost_app_and_window() {
+            if let Ok((app, pos, pid)) = get_frontmost_target() {
                 if !is_our_app(&app) {
+                    set_last_target_pid(pid);
                     if let Ok(mut guard) = LAST_ACTIVE_APP.lock() {
                         *guard = Some(app.clone());
                     }
@@ -1711,7 +1914,7 @@ pub async fn simulate_copy() -> Result<(), String> {
         // focus between the shortcut and now — re-raise the EXACT captured window by its
         // position (AXRaise), never a plain `activate`: multi-window apps raise their
         // last-focused window, which can sit on another monitor and holds no selection.
-        let (front, front_pos) = get_frontmost_app_and_window().unwrap_or_default();
+        let (front, front_pos, front_pid) = get_frontmost_target().unwrap_or_default();
         let stored_pos = LAST_ACTIVE_WIN_POS.lock().ok().and_then(|g| *g);
         // An app-level match is not enough: after a popup interaction the right APP can be
         // frontmost with the WRONG window key (another Brave window on another monitor) — a
@@ -1728,7 +1931,12 @@ pub async fn simulate_copy() -> Result<(), String> {
             "[CopyDebug] frontmost at copy = '{}' win={:?} (target '{}' win={:?})",
             front, front_pos, target, stored_pos
         );
-        let keystroke = if (front == target && win_matches) || front == "osascript" {
+        // Same name, different process (another Chrome instance) is NOT the target.
+        let pid_matches = match (front_pid, last_target_pid()) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        };
+        let keystroke = if (front == target && win_matches && pid_matches) || front == "osascript" {
             r#"
             tell application "System Events"
                 key code 8 using command down
@@ -2168,7 +2376,7 @@ pub async fn simulate_terminal_copy() -> Result<(), String> {
 // voice shortcut was first pressed), bypassing the live foreground tracker so
 // the result always lands where the user started.
 #[tauri::command]
-pub async fn simulate_paste_to_app(app: String, win_x: Option<i32>, win_y: Option<i32>) -> Result<(), String> {
+pub async fn simulate_paste_to_app(app: String, win_x: Option<i32>, win_y: Option<i32>, pid: Option<i32>) -> Result<(), String> {
     resume_tracker(); // uses the explicit target, so the pin (from capture) can lift now
     #[cfg(target_os = "macos")]
     {
@@ -2185,7 +2393,7 @@ pub async fn simulate_paste_to_app(app: String, win_x: Option<i32>, win_y: Optio
                 _ => LAST_ACTIVE_WIN_POS.lock().ok().and_then(|g| *g),
             };
             format!("{}tell application \"System Events\" to keystroke \"v\" using command down",
-                activate_target_prelude_at(trimmed, pos))
+                activate_target_prelude_at(trimmed, pos, pid.or_else(last_target_pid)))
         };
 
         let output = Command::new("osascript")
@@ -2209,7 +2417,7 @@ pub async fn simulate_paste_to_app(app: String, win_x: Option<i32>, win_y: Optio
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app; // Windows uses HWND-based restore in simulate_paste
+        let _ = (app, win_x, win_y, pid); // Windows uses HWND-based restore in simulate_paste
         simulate_paste().await
     }
 }
@@ -2219,7 +2427,7 @@ pub async fn simulate_paste_to_app(app: String, win_x: Option<i32>, win_y: Optio
 // background app), and on those paths nothing pastes, so VibeTranslate would otherwise stay in
 // front. If the target app is unknown, hide ourselves so focus returns to whatever was behind us.
 #[tauri::command]
-pub async fn restore_focus_to_app(app: String) -> Result<(), String> {
+pub async fn restore_focus_to_app(app: String, pid: Option<i32>) -> Result<(), String> {
     resume_tracker(); // voice cancel/error: lift the pin the capture set
     #[cfg(target_os = "macos")]
     {
@@ -2228,19 +2436,22 @@ pub async fn restore_focus_to_app(app: String) -> Result<(), String> {
         // nowhere else to return to), so do NOTHING. Do NOT hide the app — `NSApp hide:` wedges it
         // in a hidden state where the overlay/settings won't re-show and voice stops working.
         if !trimmed.is_empty() {
-            let script = format!(r#"tell application "{}" to activate"#, escape_applescript(trimmed));
+            // By process id when known: `tell application X to activate` picks any instance
+            // of a multi-instance app (a second Chrome profile), so a cancelled dictation
+            // handed focus to a different browser window than the one the user was in.
+            let script = activate_target_prelude_at(trimmed, None, pid.or_else(last_target_pid));
             let _ = Command::new("osascript").arg("-e").arg(&script).output();
         }
         Ok(())
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = app; // Windows restores the saved target window by HWND, not by name
+        let _ = (app, pid); // Windows restores the saved target window by HWND, not by name
         restore_foreground_window()
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        let _ = app;
+        let _ = (app, pid);
         Ok(())
     }
 }

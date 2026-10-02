@@ -47,11 +47,11 @@ export async function simulatePaste(): Promise<void> {
 
 // Paste into a specific app (captured at voice first-press), bypassing the
 // live foreground tracker so it lands where the user started.
-export async function simulatePasteToApp(app: string, pos?: [number, number] | null): Promise<void> {
+export async function simulatePasteToApp(app: string, pos?: [number, number] | null, pid?: number | null): Promise<void> {
   // pos = the target window's position snapshotted at operation START (voice) — without it
   // the Rust side falls back to the live-tracked slot, which another operation may have
   // overwritten while a long recording was in flight.
-  await invoke('simulate_paste_to_app', { app, winX: pos?.[0] ?? null, winY: pos?.[1] ?? null });
+  await invoke('simulate_paste_to_app', { app, winX: pos?.[0] ?? null, winY: pos?.[1] ?? null, pid: pid ?? null });
 }
 
 // Get terminal selection using Console APIs (AttachConsole + GetConsoleSelectionInfo)

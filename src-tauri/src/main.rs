@@ -101,6 +101,7 @@ fn main() {
             keyboard::get_target_app,
             keyboard::capture_foreground_hwnd,
             keyboard::get_captured_target_pos,
+            keyboard::get_captured_target_pid,
             stt::transcribe_local,
             stt::stt_model_status,
             stt::download_stt_model,
