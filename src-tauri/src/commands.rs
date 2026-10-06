@@ -528,15 +528,330 @@ fn position_recording_window(window: &tauri::WebviewWindow, position: &str) {
     }
 }
 
+// ---- Recording popup: "notch" position (MacBooks with a camera housing) ----
+//
+// The popup grows out of the notch: a black shape flush with the top of the built-in display,
+// as wide as the notch plus a "wing" on each side for the level meter, timer and buttons. The
+// notch itself covers the middle, so nothing is drawn there.
+//
+// Only where a notch exists. On a screen without one (an external monitor, or the lid closed)
+// the popup falls back to the ordinary "top" pill, so the setting is never a dead end.
+//
+// The window has to be BORDERLESS while it sits there: macOS keeps titled windows out of the
+// menu bar, and the rounded-corner plugin makes this window titled. Verified on a notched
+// MacBook: a titled window asked for the notch strip was moved 830pt down, a borderless one
+// stayed put. So the pill's chrome is saved, swapped for a borderless one while in the notch,
+// and restored exactly when the popup goes back to being a pill.
+
+// The constants below are only read by the macOS notch path.
+/// Space beside the notch on each side, in points. Fits the timer and both buttons, or a
+/// status word ("Transcribing…") and the cancel button.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const NOTCH_WING: f64 = 128.0;
+/// Extra height below the notch for an error message (the wings have no room for one).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const NOTCH_MESSAGE_ROW: f64 = 26.0;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PILL_SIZE: (f64, f64) = (286.0, 46.0);
+
+/// What the overlay should draw. Sent on every show (event "recording-layout") and readable
+/// on mount (recording_layout), so the webview never guesses its window's shape.
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingLayout {
+    notch: bool,
+    notch_width: f64,
+    notch_height: f64,
+    wing: f64,
+}
+
+const PILL_LAYOUT: RecordingLayout = RecordingLayout { notch: false, notch_width: 0.0, notch_height: 0.0, wing: 0.0 };
+static RECORDING_LAYOUT: std::sync::Mutex<RecordingLayout> = std::sync::Mutex::new(PILL_LAYOUT);
+/// While in the notch: the window's frame (top-left x, y, width, base height) and the primary
+/// screen's height for AppKit's bottom-left coordinates. None while it is a pill.
+#[cfg(target_os = "macos")]
+static NOTCH_FRAME: std::sync::Mutex<Option<(f64, f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+
+#[cfg(target_os = "macos")]
+fn in_notch() -> bool {
+    NOTCH_FRAME.lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
+/// Window level: one above the status-item windows while in the notch, so menu-bar icons
+/// never draw over the popup; the usual floating level otherwise.
+#[cfg(target_os = "macos")]
+fn overlay_level_for(label: &str) -> i64 {
+    if label == "recording" && in_notch() { 26 } else { 25 }
+}
+
+/// Run `f` on the main thread (AppKit window and screen calls belong there) and wait for it,
+/// bounded. Never call this FROM the main thread.
+#[cfg(target_os = "macos")]
+fn on_main<T: Send + 'static>(app: &AppHandle, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(f());
+    })
+    .ok()?;
+    rx.recv_timeout(std::time::Duration::from_millis(500)).ok()
+}
+
+#[cfg(target_os = "macos")]
+mod notch_native {
+    use cocoa::base::{id, nil, BOOL, NO, YES};
+    use cocoa::foundation::{NSPoint, NSRect, NSSize};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct NSEdgeInsets {
+        top: f64,
+        left: f64,
+        bottom: f64,
+        right: f64,
+    }
+
+    /// A display with a camera housing, in the top-left-origin point space window positions
+    /// use, plus the housing's size.
+    pub struct NotchScreen {
+        pub x: f64,
+        pub y: f64,
+        pub w: f64,
+        pub h: f64,
+        pub notch_w: f64,
+        pub notch_h: f64,
+    }
+
+    /// Displays with a notch, and the primary display's height (for converting to AppKit's
+    /// bottom-left coordinates). Main thread.
+    pub unsafe fn notch_screens() -> (Vec<NotchScreen>, f64) {
+        let mut out = Vec::new();
+        let screens: id = msg_send![class!(NSScreen), screens];
+        if screens == nil {
+            return (out, 0.0);
+        }
+        let n: usize = msg_send![screens, count];
+        if n == 0 {
+            return (out, 0.0);
+        }
+        let primary: id = msg_send![screens, objectAtIndex: 0usize];
+        let pf: NSRect = msg_send![primary, frame];
+        for i in 0..n {
+            let s: id = msg_send![screens, objectAtIndex: i];
+            // safeAreaInsets and the auxiliary areas are macOS 12+; this app supports 10.15,
+            // where sending them would raise an exception.
+            let has_insets: BOOL = msg_send![s, respondsToSelector: sel!(safeAreaInsets)];
+            let has_aux: BOOL = msg_send![s, respondsToSelector: sel!(auxiliaryTopLeftArea)];
+            if has_insets != YES || has_aux != YES {
+                continue;
+            }
+            let insets: NSEdgeInsets = msg_send![s, safeAreaInsets];
+            if insets.top <= 0.0 {
+                continue;
+            }
+            let f: NSRect = msg_send![s, frame];
+            let left: NSRect = msg_send![s, auxiliaryTopLeftArea];
+            let right: NSRect = msg_send![s, auxiliaryTopRightArea];
+            let notch_w = f.size.width - left.size.width - right.size.width;
+            if notch_w <= 0.0 || notch_w > f.size.width / 2.0 {
+                continue;
+            }
+            out.push(NotchScreen {
+                x: f.origin.x,
+                y: pf.size.height - (f.origin.y + f.size.height),
+                w: f.size.width,
+                h: f.size.height,
+                notch_w,
+                notch_h: insets.top,
+            });
+        }
+        (out, pf.size.height)
+    }
+
+    // The pill's chrome (style mask, retained background colour), kept while in the notch.
+    static SAVED: std::sync::Mutex<Option<(u64, usize)>> = std::sync::Mutex::new(None);
+
+    pub unsafe fn set_frame_tl(ns: id, x: f64, y: f64, w: f64, h: f64, primary_h: f64) {
+        let r = NSRect::new(NSPoint::new(x, primary_h - (y + h)), NSSize::new(w, h));
+        let _: () = msg_send![ns, setFrame: r display: YES];
+    }
+
+    unsafe fn style_layer(ns: id, radius: f64, bottom_only: bool) {
+        let view: id = msg_send![ns, contentView];
+        if view == nil {
+            return;
+        }
+        let _: () = msg_send![view, setWantsLayer: YES];
+        let layer: id = msg_send![view, layer];
+        if layer == nil {
+            return;
+        }
+        // CACornerMask is in the layer's own geometry: with flipped contents MinY is the top.
+        let flipped: BOOL = msg_send![layer, contentsAreFlipped];
+        let corners: u64 = if !bottom_only {
+            1 | 2 | 4 | 8
+        } else if flipped == YES {
+            4 | 8
+        } else {
+            1 | 2
+        };
+        let _: () = msg_send![layer, setCornerRadius: radius];
+        let _: () = msg_send![layer, setMaskedCorners: corners];
+        let _: () = msg_send![layer, setMasksToBounds: YES];
+    }
+
+    /// Borderless, square top, rounded bottom, no shadow, at the given frame.
+    pub unsafe fn enter(ns: id, x: f64, y: f64, w: f64, h: f64, primary_h: f64) {
+        let mut saved = SAVED.lock().unwrap_or_else(|e| e.into_inner());
+        if saved.is_none() {
+            let mask: u64 = msg_send![ns, styleMask];
+            let bg: id = msg_send![ns, backgroundColor];
+            let bg: id = if bg != nil { msg_send![bg, retain] } else { nil };
+            *saved = Some((mask, bg as usize));
+        }
+        let _: () = msg_send![ns, setStyleMask: 0u64];
+        let clear: id = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![ns, setBackgroundColor: clear];
+        let _: () = msg_send![ns, setOpaque: NO];
+        let _: () = msg_send![ns, setHasShadow: NO];
+        let _: () = msg_send![ns, setLevel: 26i64];
+        style_layer(ns, 12.0, true);
+        set_frame_tl(ns, x, y, w, h, primary_h);
+    }
+
+    /// Back to the pill's own chrome and size (top-left kept; the caller re-centres it).
+    /// False when it was not in the notch.
+    pub unsafe fn leave(ns: id, pill: (f64, f64)) -> bool {
+        let Some((mask, bg)) = SAVED.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+            return false;
+        };
+        let _: () = msg_send![ns, setStyleMask: mask];
+        if bg != 0 {
+            let _: () = msg_send![ns, setBackgroundColor: bg as id];
+            let _: () = msg_send![bg as id, release];
+        }
+        let _: () = msg_send![ns, setHasShadow: YES];
+        let _: () = msg_send![ns, setLevel: 25i64];
+        style_layer(ns, 14.0, false);
+        // Synchronously, here: a deferred resize would let the caller centre the pill using
+        // the notch-wide frame it still had.
+        let f: NSRect = msg_send![ns, frame];
+        let top = f.origin.y + f.size.height;
+        let r = NSRect::new(NSPoint::new(f.origin.x, top - pill.1), NSSize::new(pill.0, pill.1));
+        let _: () = msg_send![ns, setFrame: r display: NO];
+        true
+    }
+}
+
+/// Shape and place the recording popup for `position`, then tell its webview which layout
+/// it got. "notch" lands in the notch of the display being worked on when it has one, and is
+/// the "top" pill everywhere else.
+fn apply_recording_layout(app: &AppHandle, window: &tauri::WebviewWindow, position: &str) {
+    #[allow(unused_mut)]
+    let mut layout = PILL_LAYOUT;
+    #[cfg(target_os = "macos")]
+    {
+        let want = position == "notch";
+        let mon = active_monitor(window).map(|m| monitor_rect(&m));
+        // Nothing to do natively unless the notch is wanted or still has to be left: the
+        // other positions keep their old, main-thread-free path to the voice start.
+        if let (true, Ok(ptr), Some(r)) = (want || in_notch(), window.ns_window(), mon) {
+            let ns = ptr as usize;
+            let (rx, ry, rw, rh) = (r.x, r.y, r.w, r.h);
+            let frame = on_main(app, move || unsafe {
+                let (screens, primary_h) = notch_native::notch_screens();
+                let near = |a: f64, b: f64| (a - b).abs() < 2.0;
+                // The display being worked on, by position; by size if the two coordinate
+                // sources disagree on a mixed-resolution setup and only one display fits.
+                let hit = if !want {
+                    None
+                } else if let Some(i) = screens.iter().position(|s| near(s.x, rx) && near(s.y, ry) && near(s.w, rw)) {
+                    Some(i)
+                } else {
+                    let same_size: Vec<usize> =
+                        (0..screens.len()).filter(|&i| near(screens[i].w, rw) && near(screens[i].h, rh)).collect();
+                    if same_size.len() == 1 { Some(same_size[0]) } else { None }
+                };
+                match hit.map(|i| &screens[i]) {
+                    Some(s) => {
+                        let w = s.notch_w + 2.0 * NOTCH_WING;
+                        let x = s.x + (s.w - w) / 2.0;
+                        notch_native::enter(ns as cocoa::base::id, x, s.y, w, s.notch_h, primary_h);
+                        Some((x, s.y, w, s.notch_h, primary_h, s.notch_w))
+                    }
+                    None => {
+                        notch_native::leave(ns as cocoa::base::id, PILL_SIZE);
+                        None
+                    }
+                }
+            })
+            .flatten();
+            if let Ok(mut g) = NOTCH_FRAME.lock() {
+                *g = frame.map(|(x, y, w, h, ph, _)| (x, y, w, h, ph));
+            }
+            if let Some((_, _, _, h, _, notch_w)) = frame {
+                layout = RecordingLayout { notch: true, notch_width: notch_w, notch_height: h, wing: NOTCH_WING };
+            }
+            crate::diag::log("voice", &format!("popup position={position} notch={}", layout.notch));
+        }
+    }
+    if !layout.notch {
+        position_recording_window(window, if position == "notch" { "top" } else { position });
+    }
+    if let Ok(mut g) = RECORDING_LAYOUT.lock() {
+        *g = layout;
+    }
+    let _ = app.emit_to("recording", "recording-layout", layout);
+}
+
+#[tauri::command]
+pub fn recording_layout() -> RecordingLayout {
+    RECORDING_LAYOUT.lock().map(|g| *g).unwrap_or(PILL_LAYOUT)
+}
+
+/// In the notch, grow down by one row to show an error message, and shrink back after.
+#[tauri::command]
+pub async fn set_recording_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let frame = NOTCH_FRAME.lock().ok().and_then(|g| *g);
+        if let (Some((x, y, w, h, primary_h)), Some(win)) = (frame, app.get_webview_window("recording")) {
+            let ns = win.ns_window().map_err(|e| e.to_string())? as usize;
+            let h = if expanded { h + NOTCH_MESSAGE_ROW } else { h };
+            on_main(&app, move || unsafe {
+                notch_native::set_frame_tl(ns as cocoa::base::id, x, y, w, h, primary_h)
+            });
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, expanded);
+    Ok(())
+}
+
+/// Whether any connected display has a notch (Settings only offers the position then).
+#[tauri::command]
+pub async fn notch_available(app: AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        on_main(&app, || unsafe { !notch_native::notch_screens().0.is_empty() }).unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
+}
+
 // Make the overlay float above everything on every Space (macOS), without
 // changing focus. Applied once when the window is created.
 #[cfg(target_os = "macos")]
 fn set_overlay_level(window: &tauri::WebviewWindow) {
     use cocoa::base::id;
     use objc::{msg_send, sel, sel_impl};
-    let _ = window.with_webview(|webview| unsafe {
+    let level = overlay_level_for(window.label());
+    let _ = window.with_webview(move |webview| unsafe {
         let ns_window = webview.ns_window() as id;
-        let _: () = msg_send![ns_window, setLevel: 25i64]; // NSStatusWindowLevel: stays above other apps/fullscreen spaces
+        let _: () = msg_send![ns_window, setLevel: level]; // NSStatusWindowLevel: stays above other apps/fullscreen spaces
         let behavior: u64 = (1 << 0) | (1 << 4) | (1 << 8); // allSpaces|stationary|fsAux
         let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
     });
@@ -614,6 +929,7 @@ fn present_overlay_on_active_space(app: &AppHandle, keep: &'static str) {
             }
         }
     }
+    let level = overlay_level_for(keep);
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let _ = app.run_on_main_thread(move || {
         use cocoa::base::{id, nil, BOOL, YES};
@@ -628,7 +944,7 @@ fn present_overlay_on_active_space(app: &AppHandle, keep: &'static str) {
             }
             if let Some(ptr) = overlay {
                 let ns = ptr as id;
-                let _: () = msg_send![ns, setLevel: 25i64];
+                let _: () = msg_send![ns, setLevel: level];
                 let behavior: u64 = (1 << 0) | (1 << 4) | (1 << 8); // allSpaces|stationary|fsAux
                 let _: () = msg_send![ns, setCollectionBehavior: behavior];
                 let _: () = msg_send![ns, orderFrontRegardless];
@@ -839,12 +1155,13 @@ pub async fn hide_transcript(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// Recording overlay: small non-activating indicator. `position` = "top" | "center" | "bottom".
+// Recording overlay: small non-activating indicator. `position` = "top" | "center" | "bottom"
+// | "notch" (see apply_recording_layout).
 #[tauri::command]
 pub async fn show_recording(app: AppHandle, position: Option<String>) -> Result<(), String> {
     ensure_recording_window(&app);
     if let Some(window) = app.get_webview_window("recording") {
-        position_recording_window(&window, position.as_deref().unwrap_or("top"));
+        apply_recording_layout(&app, &window, position.as_deref().unwrap_or("top"));
         let _ = window.set_always_on_top(true);
         window.show().map_err(|e| e.to_string())?;
         // Bring the app to the foreground FIRST so WebKit un-mutes the mic (getUserMedia is

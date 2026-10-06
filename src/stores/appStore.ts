@@ -74,7 +74,7 @@ interface AppState {
   micDeviceId: string; // preferred microphone deviceId ('' = system default)
   lastMicUsed: string; // label of the mic actually used in the last recording (session-only)
   voiceCorrections: VoiceCorrection[]; // post-transcription find-and-replace dictionary
-  voicePopupPosition: string; // 'top' | 'center' | 'bottom'
+  voicePopupPosition: string; // 'top' | 'center' | 'bottom' | 'notch' (macOS, notched display)
   voiceSoundEnabled: boolean; // sound when voice recording starts/stops
   micAutoGain: boolean;       // single mic knob: boost quiet mics (AGC) so speech is heard
   voiceSttEngine: string;     // 'auto' (online: BYOK/server) | 'omnilingual-300m' (offline, experimental)

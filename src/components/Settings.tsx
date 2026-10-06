@@ -257,6 +257,11 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
   // System Settings — another app — so there is no event to listen for, and a card that
   // still says "not granted" after they just granted it is worse than no card.
   const [perms, setPerms] = useState<{ accessibility: boolean; microphone: string } | null>(null);
+  // A display with a camera notch is connected: offer the "Notch" popup position.
+  const [notchAvailable, setNotchAvailable] = useState(false);
+  useEffect(() => {
+    void invoke<boolean>('notch_available').then(setNotchAvailable).catch(() => { /* not macOS / no notch */ });
+  }, []);
   useEffect(() => {
     if (navigator.platform.toUpperCase().indexOf('MAC') < 0) return;
     let lastAx: boolean | null = null;
@@ -2030,8 +2035,12 @@ export default function Settings({ onCheckForUpdates }: SettingsProps = {}) {
                     { value: 'top', label: t('positionTop') },
                     { value: 'center', label: t('positionCenter') },
                     { value: 'bottom', label: t('positionBottom') },
+                    // Kept visible while selected even with no notch connected (lid closed):
+                    // a saved choice must not vanish from the control that shows it.
+                    ...(notchAvailable || voicePopupPosition === 'notch' ? [{ value: 'notch', label: t('positionNotch') }] : []),
                   ]}
                 />
+                {voicePopupPosition === 'notch' && <p className="text-[12px] text-white/45">{t('positionNotchHint')}</p>}
               </SettingCard>
             </div>
           )}

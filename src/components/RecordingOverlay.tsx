@@ -22,6 +22,15 @@ import logoMark from '@/assets/logo-mark.png';
 
 const EMPTY_BARS = new Array(VOICE_BAR_COUNT).fill(0);
 
+/** The window's shape, decided natively on every show (apply_recording_layout in commands.rs). */
+interface RecordingLayout {
+  notch: boolean;
+  notchWidth: number;
+  notchHeight: number;
+  wing: number;
+}
+const PILL_LAYOUT: RecordingLayout = { notch: false, notchWidth: 0, notchHeight: 0, wing: 0 };
+
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 // Mute/unmute system audio so background sound doesn't bleed into the mic + VAD.
@@ -781,6 +790,22 @@ export default function RecordingOverlay() {
   // One-word engine tag shown next to the status ("· offline" / "· Groq" / "· server") —
   // the INTENDED engine at start; a mid-process fallback is reported via console/Settings.
   const [engineTag, setEngineTag] = useState('');
+  // Pill, or grown out of the MacBook notch. Rust says which on every show; read it on mount
+  // too, in case this window was created after the last announcement.
+  const [layout, setLayout] = useState<RecordingLayout>(PILL_LAYOUT);
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void invoke<RecordingLayout>('recording_layout').then(setLayout).catch(() => { /* pill */ });
+    void listen<RecordingLayout>('recording-layout', (e) => setLayout(e.payload)).then((f) => { un = f; });
+    return () => { un?.(); };
+  }, []);
+  // The notch's wings hold a status word at most. An error gets a row of its own underneath,
+  // and the shape shrinks back when the next session starts.
+  const notchMessageRow = layout.notch && status === 'error';
+  useEffect(() => {
+    if (!layout.notch) return;
+    void invoke('set_recording_expanded', { expanded: notchMessageRow }).catch(() => { /* cosmetic */ });
+  }, [layout.notch, notchMessageRow]);
   // Provisional text while speaking. Kept separate from `message` so the status line and the
   // transcript never fight over the same slot.
   const [liveText, setLiveText] = useState('');
@@ -854,29 +879,82 @@ export default function RecordingOverlay() {
 
   const processing = status === 'transcribing' || status === 'translating' || status === 'pasting';
   const busy = recording || processing; // cancel (Esc) is available the whole time
+
+  const levelBars = (
+    <div className="flex h-4 shrink-0 items-end gap-[3px]">
+      {bars.map((b, i) => (
+        <span
+          key={i}
+          className="w-[3px] rounded-full bg-red-500"
+          style={{ height: String(Math.max(15, Math.min(100, b * 100))) + '%', transition: 'height 70ms ease-out' }}
+        />
+      ))}
+    </div>
+  );
+  const logo = (
+    <img src={logoMark} alt="" aria-hidden="true" draggable={false} className="relative h-5 w-5 shrink-0 select-none object-contain opacity-90" />
+  );
+  // ✓ = finish -> transcribe & paste (click, Enter, or re-press shortcut); ✗ = cancel (Esc).
+  // Framed as a group in the pill; bare in the notch, where the black shape is the frame.
+  const actions = (framed: boolean) => busy ? (
+    <div className={'flex shrink-0 items-center gap-1 ' + (framed ? 'rounded-lg border border-white/10 bg-black/20 p-0.5 shadow-inner' : '')}>
+      {recording && (
+        <button
+          type="button"
+          onClick={() => processHandlerRef.current()}
+          title="Done — Enter, or press the voice shortcut again (works from any app)"
+          aria-label="Done"
+          className="vt-action-button vt-action-button-done flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-emerald-200 transition-all duration-150 active:scale-90"
+        >
+          <Check size={14} strokeWidth={2.5} />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => cancelHandlerRef.current()}
+        title="Cancel (Esc)"
+        aria-label="Cancel (Esc)"
+        className="vt-action-button vt-action-button-cancel flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-rose-200 transition-all duration-150 active:scale-90"
+      >
+        <X size={14} strokeWidth={2.5} />
+      </button>
+    </div>
+  ) : null;
+
+  // Grown out of the notch: one wing each side of the camera housing, nothing drawn behind
+  // it, pure black so the shape and the housing read as one.
+  if (layout.notch) {
+    return (
+      <div className="flex h-screen w-screen select-none flex-col overflow-hidden bg-black">
+        <div className="flex shrink-0 items-center" style={{ height: layout.notchHeight }}>
+          <div className="flex h-full min-w-0 items-center gap-2.5 pl-4" style={{ width: layout.wing }}>
+            {logo}
+            {recording ? levelBars : <span className="shrink-0">{icon}</span>}
+          </div>
+          <div className="h-full shrink-0" style={{ width: layout.notchWidth }} aria-hidden="true" />
+          <div className="flex h-full min-w-0 items-center justify-end gap-2 pr-2.5" style={{ width: layout.wing }}>
+            {recording ? (
+              <span className="shrink-0 text-[11px] tabular-nums text-white/60">{elapsedLabel}</span>
+            ) : status !== 'error' ? (
+              <span className="min-w-0 truncate text-[11px] font-medium text-white/80" title={message}>{message}</span>
+            ) : null}
+            {actions(false)}
+          </div>
+        </div>
+        {notchMessageRow && (
+          <div role="alert" className="flex flex-1 items-start justify-center px-4 text-center text-[11.5px] font-medium leading-tight text-red-300">
+            {message}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex h-screen w-screen items-center justify-between gap-1.5 overflow-hidden bg-[#1c1c1e] px-2.5 select-none">
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <img
-            src={logoMark}
-            alt=""
-            aria-hidden="true"
-            draggable={false}
-            className="relative h-5 w-5 select-none object-contain opacity-90"
-          />
-        {recording ? (
-          <div className="ml-1.5 flex h-4 shrink-0 items-end gap-[3px]">
-            {bars.map((b, i) => (
-              <span
-                key={i}
-                className="w-[3px] rounded-full bg-red-500"
-                style={{ height: String(Math.max(15, Math.min(100, b * 100))) + '%', transition: 'height 70ms ease-out' }}
-              />
-            ))}
-          </div>
-        ) : (
-          <span className="shrink-0">{icon}</span>
-        )}
+        {logo}
+        {recording ? <div className="ml-1.5">{levelBars}</div> : <span className="shrink-0">{icon}</span>}
         <span className={'mx-1 min-w-[52px] flex-1 overflow-hidden whitespace-nowrap py-0.5 text-[11px] font-medium leading-normal ' + (status === 'error' ? 'text-red-300' : 'text-white/85')}>
           {message}
         </span>
@@ -893,34 +971,7 @@ export default function RecordingOverlay() {
         )}
       </div>
 
-      {busy ? (
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-white/10 bg-black/20 p-0.5 shadow-inner">
-          {/* ✓ = finish -> transcribe & paste (click, Enter, or re-press shortcut) */}
-          {recording && (
-            <button
-              type="button"
-              onClick={() => processHandlerRef.current()}
-              title="Done — Enter, or press the voice shortcut again (works from any app)"
-              aria-label="Done"
-              className="vt-action-button vt-action-button-done flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-emerald-200 transition-all duration-150 active:scale-90"
-            >
-              <Check size={14} strokeWidth={2.5} />
-            </button>
-          )}
-          {/* ✗ = cancel (pastes nothing) — click or Esc */}
-          <button
-            type="button"
-            onClick={() => cancelHandlerRef.current()}
-            title="Cancel (Esc)"
-            aria-label="Cancel (Esc)"
-            className="vt-action-button vt-action-button-cancel flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-rose-200 transition-all duration-150 active:scale-90"
-          >
-            <X size={14} strokeWidth={2.5} />
-          </button>
-        </div>
-      ) : (
-        <span className="w-4 shrink-0" />
-      )}
+      {actions(true) ?? <span className="w-4 shrink-0" />}
     </div>
   );
 }

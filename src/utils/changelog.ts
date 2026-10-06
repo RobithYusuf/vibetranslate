@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.0.68',
+    date: '2026-10-06',
+    changes: [
+      'New on MacBooks with a notch: the recording popup can grow out of the notch, like a built-in part of macOS (Settings › Appearance › Recording popup position › Notch)',
+      'On a screen without a notch, such as an external monitor, it shows at the top as usual',
+    ],
+  },
+  {
     version: '1.0.67',
     date: '2026-10-03',
     changes: [
